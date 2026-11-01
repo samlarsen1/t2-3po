@@ -15,7 +15,7 @@ from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UnexpectedModel
 from .agents import build_council, build_model
 from .config import Settings
 from .market import MarketData, MarketDataError
-from .output import export_approved, write_outputs
+from .output import export_approved, render_report, write_outputs
 from .pipeline import build_proposal, evaluate, gather_context
 from .portfolio import Limits, PortfolioSnapshot, fetch_snapshot
 from .t212 import ReadOnlyTrading212Client, Trading212Error
@@ -43,13 +43,11 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
         print(f"No theses found in {settings.theses_dir}", file=sys.stderr)
         return 1
 
-    council = None
-    if not args.dry_run:
-        try:
-            council = build_council(build_model(settings))
-        except ValueError as exc:
-            print(f"Configuration error: {exc}", file=sys.stderr)
-            return 1
+    try:
+        council = build_council(build_model(settings), settings.digest_cache_ttl)
+    except ValueError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 1
 
     market = MarketData()
     limits = Limits(
@@ -69,11 +67,11 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
         try:
             thesis = parse_thesis(path)
             context = await gather_context(thesis, market, portfolio, limits)
-            if council is None:
-                print(context.render())
-                continue
             result = await evaluate(context, council)
             proposal = build_proposal(context, result)
+            if args.dry_run:
+                print(render_report(context, result, proposal))
+                continue
             report, machine = write_outputs(
                 context, result, proposal, settings.reports_dir, settings.proposals_dir
             )
@@ -121,7 +119,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the data the council would see; calls no models and writes no files",
+        help="Run the full evaluation, with paid model calls, but print the report, not files",
     )
 
     export = commands.add_parser("export", help="Export a human-approved proposal for t2-d2")
@@ -136,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     settings = Settings()
     logging.basicConfig(level=settings.log_level, format="%(levelname)s %(name)s %(message)s")
-    # httpx logs full request URLs at INFO, and yfinance logs noisily on failed lookups.
+    # HTTP clients log every request at INFO, and yfinance logs noisily on failed lookups.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
     if args.command == "export":

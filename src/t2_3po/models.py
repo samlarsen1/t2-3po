@@ -75,7 +75,7 @@ class OrchestratorDecision(BaseModel):
     critique: str = Field(description="Where the thesis holds, where it fails, and why.")
     key_risks: list[str]
     portfolio_warnings: list[str] = Field(
-        description="Portfolio risks beyond the concentration findings you were given."
+        description="Only portfolio risks not already in the concentration findings you were given."
     )
     proposed_allocations: list[ProposedAllocation]
     suggested_config_updates: list[ConfigUpdate]

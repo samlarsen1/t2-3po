@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+CacheTtl = Literal["off", "5m", "1h"]
 
 
 class Settings(BaseSettings):
@@ -19,6 +22,7 @@ class Settings(BaseSettings):
 
     anthropic_api_key: SecretStr | None = None
     claude_model: str = "claude-sonnet-5-5"
+    digest_cache_ttl: CacheTtl = "5m"
 
     max_sector_weight: float = Field(default=0.30, gt=0, le=1)
     # Matches the largest max_portfolio_weight_pct in t2-d2's strategy.yaml (aggressive mode).

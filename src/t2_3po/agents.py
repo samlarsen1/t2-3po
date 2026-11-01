@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from pydantic_ai import Agent, NativeOutput
+from pydantic_ai import Agent, CachePoint, NativeOutput
+from pydantic_ai.messages import UserContent
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
-from .config import Settings
+from .config import CacheTtl, Settings
 from .models import AnalystView, CouncilResult, OrchestratorDecision, QuantView
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,10 @@ current weights and concentration findings provided. Propose only the ticker und
 current holdings, and include a holding other than the ticker under review only when concentration \
 makes it necessary. If the portfolio is unavailable, say that your weights are provisional.
 
+The concentration findings you were given are added to the proposal automatically, so don't \
+restate them, or the fact that the portfolio is unavailable, in portfolio_warnings. Leave it empty \
+if you have nothing to add.
+
 Use suggested_config_updates only when the verdict justifies changing how aggressively t2-d2 \
 dip-buys the ticker: its strategy is mild, moderate or aggressive. Otherwise leave it empty."""
 
@@ -86,10 +92,15 @@ class Council:
     quant: Agent[None, QuantView]
     orchestrator: Agent[None, OrchestratorDecision]
     digester: Agent[None, str]
+    digest_cache_ttl: CacheTtl
 
 
-def build_council(model: Model) -> Council:
-    """Build the agents. Output uses native structured output rather than a forced tool call."""
+def build_council(model: Model, digest_cache_ttl: CacheTtl = "5m") -> Council:
+    """Build the agents. Output uses native structured output rather than a forced tool call.
+
+    Only the digester uses prompt caching. On a measured run, caching the council's data saved
+    nothing: its input is small, and agents with different output schemas can't share a cache.
+    """
 
     def agent(name: str, output: type[Any], prompt: str) -> Agent[None, Any]:
         return Agent(
@@ -107,6 +118,7 @@ def build_council(model: Model) -> Council:
         quant=agent("quant", QuantView, QUANT_PROMPT),
         orchestrator=agent("orchestrator", OrchestratorDecision, ORCHESTRATOR_PROMPT),
         digester=Agent(model, name="digester", output_type=str, instructions=DIGEST_PROMPT),
+        digest_cache_ttl=digest_cache_ttl,
     )
 
 
@@ -124,21 +136,30 @@ def build_model(settings: Settings) -> Model:
     )
 
 
-async def _run(agent: Agent[None, T], prompt: str) -> T:
+async def _run(agent: Agent[None, T], prompt: str | Sequence[UserContent]) -> T:
     result = await agent.run(prompt)
     usage = result.usage
     logger.info(
-        "agent_finished agent=%s usage_input=%s usage_output=%s",
+        "agent_finished agent=%s usage_input=%s usage_output=%s "
+        "usage_cache_read=%s usage_cache_write=%s",
         agent.name,
         usage.input_tokens,
         usage.output_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens,
     )
     return result.output
 
 
 async def digest_document(council: Council, thesis_body: str, name: str, text: str) -> str:
     """Summarise one long document in light of the thesis."""
-    prompt = f'<thesis>\n{thesis_body}\n</thesis>\n\n<document name="{name}">\n{text}\n</document>'
+    # The document comes first so that a rerun can reuse it, even if the thesis has been edited.
+    document = f'<document name="{name}">\n{text}\n</document>'
+    thesis = f"<thesis>\n{thesis_body}\n</thesis>"
+    ttl = council.digest_cache_ttl
+    prompt: list[UserContent] = (
+        [document, thesis] if ttl == "off" else [document, CachePoint(ttl=ttl), thesis]
+    )
     return await _run(council.digester, prompt)
 
 

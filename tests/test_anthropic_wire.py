@@ -14,7 +14,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
-from t2_3po.agents import build_council
+from t2_3po.agents import build_council, digest_document
 from t2_3po.models import AnalystView
 
 VIEW = {"summary": "Case.", "key_points": ["Point"], "conviction": "HIGH"}
@@ -62,6 +62,76 @@ async def test_request_uses_native_structured_output() -> None:
     assert not {"temperature", "top_p", "top_k"} & body.keys()
     assert body.get("thinking", {}).get("type", "adaptive") == "adaptive"
     assert "Bull Analyst" in json.dumps(body["system"])
+
+
+def _cache_control(block: dict[str, Any]) -> dict[str, Any] | None:
+    return block.get("cache_control")
+
+
+def _sse(text: str) -> httpx2.Response:
+    """Build a streamed response, which the digester gets because it has no output cap."""
+    message = {**_message(""), "content": [], "stop_reason": None}
+    events: list[dict[str, Any]] = [
+        {"type": "message_start", "message": message},
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""},
+        },
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}},
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": 5},
+        },
+        {"type": "message_stop"},
+    ]
+    payload = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+    return httpx2.Response(200, headers={"content-type": "text/event-stream"}, text=payload)
+
+
+def _request_recorder(
+    bodies: list[dict[str, Any]],
+) -> httpx2.MockTransport:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if body.get("stream"):
+            return _sse("Digest.")
+        return httpx2.Response(200, json=_message(json.dumps(VIEW)))
+
+    return httpx2.MockTransport(handler)
+
+
+async def test_council_requests_are_not_cached() -> None:
+    bodies: list[dict[str, Any]] = []
+
+    await build_council(_model(_request_recorder(bodies))).bull.run("<thesis>x</thesis>")
+
+    assert "cache_control" not in json.dumps(bodies[0])
+
+
+async def test_digest_caches_the_document_and_keeps_the_thesis_after_it() -> None:
+    bodies: list[dict[str, Any]] = []
+    council = build_council(_model(_request_recorder(bodies)), "1h")
+
+    assert await digest_document(council, "My thesis", "10k.txt", "Filing text") == "Digest."
+
+    first, second = bodies[0]["messages"][0]["content"]
+    assert "Filing text" in first["text"]
+    assert _cache_control(first) == {"type": "ephemeral", "ttl": "1h"}
+    assert "My thesis" in second["text"]
+    assert _cache_control(second) is None
+
+
+async def test_off_sends_no_cache_control() -> None:
+    bodies: list[dict[str, Any]] = []
+    council = build_council(_model(_request_recorder(bodies)), "off")
+
+    await digest_document(council, "My thesis", "10k.txt", "Filing text")
+
+    assert "cache_control" not in json.dumps(bodies[0])
 
 
 async def test_bounds_are_enforced_after_schema_transformation() -> None:

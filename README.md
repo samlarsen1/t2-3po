@@ -29,10 +29,11 @@ cp .env.example .env    # then fill in your keys
 # Write a thesis
 cp theses/NVDA.example.md theses/NVDA.md
 
-# See exactly what the council would receive. Calls no models and writes no files.
+# Run the full evaluation and print the report, without writing any files.
+# This makes the same paid model calls as a normal run.
 uv run t2-3po evaluate theses/NVDA.md --dry-run
 
-# Run the council
+# Run the evaluation and write the report and proposal
 uv run t2-3po evaluate theses/NVDA.md
 
 # Or every thesis in theses/ (*.example.md files are skipped)
@@ -111,8 +112,9 @@ A thesis is a markdown file with YAML front matter. See
 |---|---|---|
 | `T212_API_KEY`, `T212_API_SECRET` | | Trading212 credentials. Use a key with read-only permissions |
 | `T212_BASE_URL` | `https://live.trading212.com` | Or `https://demo.trading212.com` |
-| `ANTHROPIC_API_KEY` | | Required for `evaluate`, except with `--dry-run` |
+| `ANTHROPIC_API_KEY` | | Required for `evaluate`, including with `--dry-run` |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for every agent, including document digests |
+| `DIGEST_CACHE_TTL` | `5m` | Prompt cache lifetime for document digests: `5m`, `1h` or `off`. See [Prompt caching](#prompt-caching) |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
 | `MAX_POSITION_WEIGHT` | `0.175` | Position limit. The default is t2-d2's highest per-mode cap |
 | `THESES_DIR`, `REPORTS_DIR`, `PROPOSALS_DIR`, `EXPORT_DIR` | `theses`, `reports`, `proposals`, `exports` | Directories |
@@ -167,6 +169,23 @@ uv sync
 | `dependency-audit.yml` | Daily, or `gh workflow run dependency-audit.yml` | `pip-audit` |
 
 Dependabot checks weekly for newer GitHub Actions versions.
+
+## Prompt caching
+
+Only document digests use prompt caching, so rerunning on the same document can reuse it even if the
+thesis has changed. Each agent's log line reports `usage_cache_read` and `usage_cache_write`.
+
+The council isn't cached. On a measured run, output made up 80% of the cost, and caching its small
+input saved nothing. Agents with different output schemas also can't share a cache.
+
+For Sonnet 5.5, a cache read costs 0.05× the normal input price. A write costs 1.25× with `5m` or 2×
+with `1h`, and a write that's never read back is a surcharge:
+
+| `DIGEST_CACHE_TTL` | Best for |
+|---|---|
+| `5m` | The default. Pays off if the document is read back at least once within 5 minutes |
+| `1h` | Repeated reruns with longer gaps. Needs at least two reads to pay off |
+| `off` | One-off digests, to avoid the write surcharge |
 
 ## Known limitations
 
