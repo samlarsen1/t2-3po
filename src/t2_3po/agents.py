@@ -10,9 +10,7 @@ from typing import Any, TypeVar
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
-from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.google import GoogleProvider
 
 from .config import Settings
 from .models import AnalystView, CouncilResult, OrchestratorDecision, QuantView
@@ -90,12 +88,12 @@ class Council:
     digester: Agent[None, str]
 
 
-def build_council(council_model: Model, digest_model: Model) -> Council:
+def build_council(model: Model) -> Council:
     """Build the agents. Output uses native structured output rather than a forced tool call."""
 
     def agent(name: str, output: type[Any], prompt: str) -> Agent[None, Any]:
         return Agent(
-            council_model,
+            model,
             name=name,
             output_type=NativeOutput(output),
             instructions=prompt,
@@ -108,31 +106,22 @@ def build_council(council_model: Model, digest_model: Model) -> Council:
         bear=agent("bear", AnalystView, BEAR_PROMPT),
         quant=agent("quant", QuantView, QUANT_PROMPT),
         orchestrator=agent("orchestrator", OrchestratorDecision, ORCHESTRATOR_PROMPT),
-        digester=Agent(digest_model, name="digester", output_type=str, instructions=DIGEST_PROMPT),
+        digester=Agent(model, name="digester", output_type=str, instructions=DIGEST_PROMPT),
     )
 
 
-def build_models(settings: Settings) -> tuple[Model, Model]:
-    """Create the Claude council model and the document digest model.
-
-    The digester uses Gemini when ``GEMINI_API_KEY`` is set, otherwise Claude.
+def build_model(settings: Settings) -> Model:
+    """Create the Claude model used by every agent.
 
     Raises:
         ValueError: If ``ANTHROPIC_API_KEY`` is missing.
     """
     if settings.anthropic_api_key is None:
         raise ValueError("ANTHROPIC_API_KEY is not set")
-    claude = AnthropicModel(
+    return AnthropicModel(
         settings.claude_model,
         provider=AnthropicProvider(api_key=settings.anthropic_api_key.get_secret_value()),
     )
-    if settings.gemini_api_key is None:
-        return claude, claude
-    gemini = GoogleModel(
-        settings.gemini_model,
-        provider=GoogleProvider(api_key=settings.gemini_api_key.get_secret_value()),
-    )
-    return claude, gemini
 
 
 async def _run(agent: Agent[None, T], prompt: str) -> T:

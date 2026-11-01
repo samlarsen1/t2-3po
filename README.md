@@ -12,8 +12,7 @@ to approve. It can't place orders: its Trading212 client has no way to send anyt
 1. **Data protocol:** reads a thesis, then fetches portfolio weights from Trading212 and fundamentals
    from Yahoo Finance. Concentration limits are checked in code.
 2. **Advisory council:** the Bull and Bear analysts argue in parallel, then the Quantitative Analyst
-   checks the thesis and both cases against the figures. Long documents are digested first, by Gemini
-   if it's configured.
+   checks the thesis and both cases against the figures. Any long documents are digested first.
 3. **Protocol officer:** synthesises a verdict and proposed allocations. Code then checks those
    proposals against the limits and the actual portfolio, and adds warnings for the reviewer.
 
@@ -113,9 +112,7 @@ A thesis is a markdown file with YAML front matter. See
 | `T212_API_KEY`, `T212_API_SECRET` | | Trading212 credentials. Use a key with read-only permissions |
 | `T212_BASE_URL` | `https://live.trading212.com` | Or `https://demo.trading212.com` |
 | `ANTHROPIC_API_KEY` | | Required for `evaluate`, except with `--dry-run` |
-| `GEMINI_API_KEY` | | Optional. Without it, Claude digests documents |
-| `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for the council |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Model for document digests |
+| `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for every agent, including document digests |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
 | `MAX_POSITION_WEIGHT` | `0.175` | Position limit. The default is t2-d2's highest per-mode cap |
 | `THESES_DIR`, `REPORTS_DIR`, `PROPOSALS_DIR`, `EXPORT_DIR` | `theses`, `reports`, `proposals`, `exports` | Directories |

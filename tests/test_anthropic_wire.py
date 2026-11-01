@@ -50,7 +50,7 @@ async def test_request_uses_native_structured_output() -> None:
         return httpx2.Response(200, json=_message(json.dumps(VIEW)))
 
     model = _model(httpx2.MockTransport(handler))
-    result = await build_council(model, model).bull.run("<thesis>x</thesis>")
+    result = await build_council(model).bull.run("<thesis>x</thesis>")
 
     assert result.output == AnalystView.model_validate(VIEW)
     body = bodies[0]
@@ -87,7 +87,7 @@ async def test_bounds_are_enforced_after_schema_transformation() -> None:
         return httpx2.Response(200, json=_message(json.dumps(responses.pop(0))))
 
     model = _model(httpx2.MockTransport(handler))
-    result = await build_council(model, model).orchestrator.run("<thesis>x</thesis>")
+    result = await build_council(model).orchestrator.run("<thesis>x</thesis>")
 
     assert requests == 2
     assert result.output.proposed_allocations == []
@@ -105,4 +105,4 @@ async def test_api_error_surfaces_as_model_http_error() -> None:
 
     model = _model(httpx2.MockTransport(handler))
     with pytest.raises(ModelHTTPError):
-        await build_council(model, model).bull.run("<thesis>x</thesis>")
+        await build_council(model).bull.run("<thesis>x</thesis>")

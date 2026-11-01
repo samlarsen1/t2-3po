@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UnexpectedModelBehavior
 
-from .agents import build_council, build_models
+from .agents import build_council, build_model
 from .config import Settings
 from .market import MarketData, MarketDataError
 from .output import export_approved, write_outputs
@@ -46,7 +46,7 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
     council = None
     if not args.dry_run:
         try:
-            council = build_council(*build_models(settings))
+            council = build_council(build_model(settings))
         except ValueError as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 1

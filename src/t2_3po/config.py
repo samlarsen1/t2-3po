@@ -18,9 +18,7 @@ class Settings(BaseSettings):
     t212_base_url: str = "https://live.trading212.com"
 
     anthropic_api_key: SecretStr | None = None
-    gemini_api_key: SecretStr | None = None
     claude_model: str = "claude-sonnet-5-5"
-    gemini_model: str = "gemini-flash-latest"
 
     max_sector_weight: float = Field(default=0.30, gt=0, le=1)
     # Matches the largest max_portfolio_weight_pct in t2-d2's strategy.yaml (aggressive mode).

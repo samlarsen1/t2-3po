@@ -55,7 +55,6 @@ class ScriptedModels:
         self.council = FunctionModel(
             self._respond, profile=ModelProfile(supports_json_schema_output=True)
         )
-        self.digest = FunctionModel(self._respond)
 
     def _respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         instructions = info.instructions or ""
@@ -104,7 +103,7 @@ def _snapshot() -> PortfolioSnapshot:
 
 async def test_full_run_writes_report_and_plan_shaped_proposal(tmp_path: Path) -> None:
     models = ScriptedModels()
-    council = build_council(models.council, models.digest)
+    council = build_council(models.council)
     market = MarketData(fetcher=lambda _: INFO)
 
     context = await gather_context(_thesis(tmp_path), market, _snapshot(), LIMITS)
@@ -144,7 +143,7 @@ async def test_no_portfolio_is_stated_in_the_proposal(tmp_path: Path) -> None:
     context = await gather_context(
         _thesis(tmp_path), MarketData(fetcher=lambda _: INFO), None, LIMITS
     )
-    result = await evaluate(context, build_council(models.council, models.digest))
+    result = await evaluate(context, build_council(models.council))
     proposal = build_proposal(context, result, now=NOW)
 
     assert "<portfolio>unavailable</portfolio>" in models.prompts["orchestrator"]
@@ -160,7 +159,7 @@ async def test_documents_reach_digester_in_full_and_digest_reaches_council(tmp_p
         _thesis(tmp_path, [document]), MarketData(fetcher=lambda _: INFO), None, LIMITS
     )
 
-    await evaluate(context, build_council(models.council, models.digest))
+    await evaluate(context, build_council(models.council))
 
     assert full_text in models.prompts["digest"]
     assert '<document_digest name="10k.txt">' in models.prompts["bear"]
@@ -176,7 +175,7 @@ async def test_missing_document_fails_before_the_council_runs(tmp_path: Path) ->
         LIMITS,
     )
     with pytest.raises(ThesisError):
-        await evaluate(context, build_council(models.council, models.digest))
+        await evaluate(context, build_council(models.council))
     assert models.prompts == {}
 
 
@@ -190,7 +189,7 @@ async def test_second_run_same_day_does_not_overwrite(tmp_path: Path) -> None:
     context = await gather_context(
         _thesis(tmp_path), MarketData(fetcher=lambda _: INFO), None, LIMITS
     )
-    result = await evaluate(context, build_council(models.council, models.digest))
+    result = await evaluate(context, build_council(models.council))
     proposal = build_proposal(context, result, now=NOW)
 
     first = write_outputs(context, result, proposal, tmp_path / "r", tmp_path / "p")
@@ -207,7 +206,7 @@ async def _proposal_file(tmp_path: Path) -> Path:
     context = await gather_context(
         _thesis(tmp_path), MarketData(fetcher=lambda _: INFO), None, LIMITS
     )
-    result = await evaluate(context, build_council(models.council, models.digest))
+    result = await evaluate(context, build_council(models.council))
     proposal = build_proposal(context, result, now=NOW)
     return write_outputs(context, result, proposal, tmp_path / "r", tmp_path / "p")[1]
 

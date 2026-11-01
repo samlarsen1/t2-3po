@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "httpx>=0.28",
     "pydantic>=2.10",
-    "pydantic-ai-slim[anthropic,google]>=2.61",
+    "pydantic-ai-slim[anthropic]>=2.61",
     "pydantic-settings>=2.6",
     "pyyaml>=6.0",
     "tenacity>=9.0",
