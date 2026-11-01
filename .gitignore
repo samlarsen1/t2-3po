@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# t2-3po run outputs (contain personal portfolio data)
+reports/
+proposals/
+exports/
+
+# Personal theses; only templates are tracked
+theses/*
+!theses/*.example.md
