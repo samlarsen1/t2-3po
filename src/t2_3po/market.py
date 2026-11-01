@@ -26,13 +26,18 @@ class MarketDataError(Exception):
 
 
 class Fundamentals(BaseModel):
-    """Fundamentals for one symbol. ``None`` means Yahoo didn't report that figure."""
+    """Fundamentals for one symbol. ``None`` means Yahoo didn't report that figure.
+
+    Per-share and valuation figures are in ``currency``. Cash, debt, cash flow and net income are
+    in ``financial_currency``, which can differ, e.g. RIO.L is quoted in GBp and reports in USD.
+    """
 
     symbol: str
     name: str | None = None
     sector: str | None = None
     industry: str | None = None
     currency: str | None = None
+    financial_currency: str | None = None
     price: float | None = None
     market_cap: float | None = None
     trailing_pe: float | None = None
@@ -42,10 +47,18 @@ class Fundamentals(BaseModel):
     fcf_yield: float | None = None
     current_ratio: float | None = None
     return_on_equity: float | None = None
+    gross_margin: float | None = None
+    operating_margin: float | None = None
     profit_margin: float | None = None
     revenue_growth: float | None = None
     earnings_growth: float | None = None
+    trailing_eps: float | None = None
     forward_eps: float | None = None
+    total_cash: float | None = None
+    total_debt: float | None = None
+    operating_cash_flow: float | None = None
+    free_cash_flow: float | None = None
+    net_income: float | None = None
     consensus_target_price: float | None = None
     consensus_recommendation: str | None = None
     analyst_count: int | None = None
@@ -98,6 +111,7 @@ def fundamentals_from_info(symbol: str, info: dict[str, Any]) -> Fundamentals:
         sector=info.get("sector"),
         industry=info.get("industry"),
         currency=info.get("currency"),
+        financial_currency=info.get("financialCurrency"),
         price=price,
         market_cap=info.get("marketCap"),
         trailing_pe=info.get("trailingPE"),
@@ -107,10 +121,18 @@ def fundamentals_from_info(symbol: str, info: dict[str, Any]) -> Fundamentals:
         fcf_yield=_fcf_yield(info),
         current_ratio=info.get("currentRatio"),
         return_on_equity=info.get("returnOnEquity"),
+        gross_margin=info.get("grossMargins"),
+        operating_margin=info.get("operatingMargins"),
         profit_margin=info.get("profitMargins"),
         revenue_growth=info.get("revenueGrowth"),
         earnings_growth=info.get("earningsGrowth"),
+        trailing_eps=info.get("trailingEps"),
         forward_eps=info.get("forwardEps"),
+        total_cash=info.get("totalCash"),
+        total_debt=info.get("totalDebt"),
+        operating_cash_flow=info.get("operatingCashflow"),
+        free_cash_flow=info.get("freeCashflow"),
+        net_income=info.get("netIncomeToCommon"),
         consensus_target_price=info.get("targetMeanPrice"),
         consensus_recommendation=info.get("recommendationKey"),
         analyst_count=info.get("numberOfAnalystOpinions"),

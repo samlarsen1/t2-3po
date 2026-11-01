@@ -42,6 +42,29 @@ def test_normalises_debt_to_equity_and_computes_fcf_yield() -> None:
     assert fundamentals.trailing_pe is None
 
 
+def test_passes_through_margins_and_financial_statement_figures() -> None:
+    info = {
+        **NVDA_INFO,
+        "grossMargins": 0.7467,
+        "operatingMargins": 0.6624,
+        "trailingEps": 7.91,
+        "totalCash": 62.0,
+        "totalDebt": 39.0,
+        "operatingCashflow": 134.0,
+        "netIncomeToCommon": 193.0,
+    }
+    fundamentals = fundamentals_from_info("NVDA", info)
+    assert fundamentals.gross_margin == 0.7467
+    assert fundamentals.operating_margin == 0.6624
+    assert fundamentals.trailing_eps == 7.91
+    assert fundamentals.total_cash == 62.0
+    assert fundamentals.total_debt == 39.0
+    assert fundamentals.operating_cash_flow == 134.0
+    assert fundamentals.free_cash_flow == 50.0
+    assert fundamentals.net_income == 193.0
+    assert fundamentals.financial_currency == "USD"
+
+
 def test_fcf_yield_handles_pence_quotes() -> None:
     info = {**NVDA_INFO, "currency": "GBp", "financialCurrency": "GBP"}
     assert fundamentals_from_info("NG.L", info).fcf_yield == pytest.approx(0.05)

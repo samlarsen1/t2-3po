@@ -37,7 +37,7 @@ def _analyst_section(title: str, view: AnalystView) -> str:
 def _metric(value: float | None, percent: bool = False) -> str:
     if value is None:
         return "n/a"
-    return f"{value:.1%}" if percent else f"{value:,.2f}"
+    return f"{value:.2%}" if percent else f"{value:,.2f}"
 
 
 def render_report(context: EvaluationContext, result: CouncilResult, proposal: Proposal) -> str:
@@ -108,6 +108,7 @@ human review; nothing has been executed.
 | Price | {_metric(data.price)} |
 | Trailing P/E | {_metric(data.trailing_pe)} |
 | Forward P/E | {_metric(data.forward_pe)} |
+| Gross margin | {_metric(data.gross_margin, percent=True)} |
 | Debt/Equity | {_metric(data.debt_to_equity)} |
 | FCF yield | {_metric(data.fcf_yield, percent=True)} |
 | Consensus target | {_metric(data.consensus_target_price)} |
