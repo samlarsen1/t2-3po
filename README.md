@@ -132,6 +132,45 @@ uv run ruff format .
 uv run mypy
 ```
 
+### Pre-commit hooks
+
+```bash
+uv sync
+uv run pre-commit install     # once after cloning
+uv run pre-commit run --all-files
+```
+
+Hooks run on every commit: `detect-secrets`, `ruff`, `bandit`, `semgrep`, `pip-audit`, `mypy` and
+`pytest`, plus a branch name check. `semgrep` and `pip-audit` need network access. Any finding blocks
+the commit.
+
+Commit on `feature/<name>`, `bug/<name>`, `task/<name>` or `hotfix/<name>`, with `<name>` in
+lowercase-with-hyphens. The hook rejects commits on any other branch, including `main`.
+
+If `detect-secrets` flags a false positive, update the baseline:
+
+```bash
+uvx detect-secrets==1.5.0 scan --baseline .secrets.baseline
+```
+
+If `pip-audit` flags a vulnerable dependency, upgrade it. `uv` ignores versions published in the last
+7 days, so a very recent fix may need a short wait.
+
+```bash
+uv lock --upgrade-package <package>
+uv sync
+```
+
+### CI
+
+| Workflow | Runs | Checks |
+|---|---|---|
+| `ci.yml` | Pushes and pull requests to `main` | `ruff`, `mypy`, `pytest` |
+| `branch-name.yml` | Pull requests to `main` | Branch naming |
+| `dependency-audit.yml` | Daily, or `gh workflow run dependency-audit.yml` | `pip-audit` |
+
+Dependabot checks weekly for newer GitHub Actions versions.
+
 ## Known limitations
 
 - **Historical valuation:** Yahoo's snapshot has no historical multiples, so the Quantitative Analyst

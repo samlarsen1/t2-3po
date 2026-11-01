@@ -139,7 +139,7 @@ async def _run(agent: Agent[None, T], prompt: str) -> T:
     result = await agent.run(prompt)
     usage = result.usage
     logger.info(
-        "agent_finished agent=%s input_tokens=%s output_tokens=%s",
+        "agent_finished agent=%s usage_input=%s usage_output=%s",
         agent.name,
         usage.input_tokens,
         usage.output_tokens,

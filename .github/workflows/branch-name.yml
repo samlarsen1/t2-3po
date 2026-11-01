@@ -1,0 +1,22 @@
+name: Branch Name
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  branch-name:
+    name: Branch name
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the source branch follows the naming convention
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ ! "$HEAD_REF" =~ ^((feature|bug|task|hotfix)/[a-z0-9]+(-[a-z0-9]+)*|dependabot/.+)$ ]]; then
+            echo "::error::Branch must be feature/<name>, bug/<name>, task/<name> or hotfix/<name>, where <name> is lowercase-with-hyphens, or a dependabot/ branch"
+            exit 1
+          fi
