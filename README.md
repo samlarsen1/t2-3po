@@ -46,15 +46,40 @@ token usage of each.
 Add `--no-portfolio` to run without Trading212 credentials. Concentration isn't checked in that mode,
 and the proposal says so.
 
+## Reviewing your stocks against a macro thesis
+
+`review` checks every traded stock in t2-d2's `config/stocks.yaml` against one macro thesis, on the
+horizon the thesis states. The watchlist is left out.
+
+```bash
+# Try two stocks first
+uv run t2-3po review --only RIO HOOD --dry-run
+
+# Review every stock, then write the reports, proposals and a comparison table
+uv run t2-3po review
+```
+
+The thesis is plain markdown with no front matter, by default at `theses/macro/core.md`. Name its
+pillars, what would count as serving each one, and what would change your mind.
+
+Verdicts describe each stock's fit with the thesis. A stock that serves no pillar is `REJECTED`, which
+means it needs its own reason to be held rather than that it's a bad company. The council is told not
+to propose selling for that reason alone.
+
+Each stock makes four Claude calls, which cost about $0.15 on a measured run, and three stocks run at
+a time. Each is sized on its own, so the summary reports what the target weights add up to.
+
 ## Output
 
 | File | Contents |
 |---|---|
 | `reports/YYYY-MM-DD_ticker.md` | Verdict, critique, risks, each analyst's case and the claim checks |
+| `reports/YYYY-MM-DD_macro_review.md` | `review` only: every stock compared in one table |
 | `proposals/proposal_YYYYMMDD.json` | The machine-readable proposal |
 
 A later run on the same day adds `_2`, `_3` and so on rather than overwriting. These directories are
-gitignored, along with your theses, because they contain personal financial data.
+gitignored, along with single-stock theses, because they contain personal financial data. The macro
+thesis in `theses/macro/` is tracked, so keep positions and amounts out of it.
 
 ```json
 {
@@ -112,7 +137,9 @@ A thesis is a markdown file with YAML front matter. See
 |---|---|---|
 | `T212_API_KEY`, `T212_API_SECRET` | | Trading212 credentials. Use a key with read-only permissions |
 | `T212_BASE_URL` | `https://live.trading212.com` | Or `https://demo.trading212.com` |
-| `ANTHROPIC_API_KEY` | | Required for `evaluate`, including with `--dry-run` |
+| `ANTHROPIC_API_KEY` | | Required for `evaluate` and `review`, including with `--dry-run` |
+| `MACRO_THESIS_FILE` | `theses/macro/core.md` | The macro thesis for `review` |
+| `STOCKS_FILE` | `../t2-d2/config/stocks.yaml` | The stocks for `review` |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for every agent, including document digests |
 | `DIGEST_CACHE_TTL` | `5m` | Prompt cache lifetime for document digests: `5m`, `1h` or `off`. See [Prompt caching](#prompt-caching) |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
@@ -195,6 +222,10 @@ with `1h`, and a write that's never read back is a surcharge:
   how much of the ISA that covers.
 - **Exchanges:** Trading212 codes map to Yahoo symbols for US, London, Xetra, Amsterdam and Paris
   listings. For other holdings, the sector is reported as unknown.
+- **Renamed tickers:** a Trading212 code can outlive a rename, such as Rocket Lab's `VACQ_US_EQ`.
+  `review` looks these up by symbol, but portfolio sector checks still report the sector as unknown.
+- **Revenue breakdown:** Yahoo has no revenue by segment, so `review` often can't confirm how much of
+  a mixed business serves a pillar.
 - **Yahoo Finance:** `yfinance` is an unofficial API and can break or return incomplete data.
 
 ## Disclaimer

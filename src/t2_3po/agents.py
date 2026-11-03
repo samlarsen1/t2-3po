@@ -76,6 +76,36 @@ if you have nothing to add.
 Use suggested_config_updates only when the verdict justifies changing how aggressively t2-d2 \
 dip-buys the ticker: its strategy is mild, moderate or aggressive. Otherwise leave it empty."""
 
+MACRO_PROMPT = """
+
+This is a macro review. The thesis is the investor's overall view rather than a view on this \
+company, and it ends by naming the stock under review. Judge the stock as a way to express that \
+thesis over the horizon it states: how directly the business serves a named pillar, and whether \
+its finances and valuation let a shareholder benefit. Being in a favoured sector isn't enough, and \
+neither is being a good company. Short-term price moves and upcoming results matter only where \
+they threaten the long-term case.
+
+The supplied figures are a snapshot and can't settle most long-term claims, so UNVERIFIABLE means \
+unresolved. Don't treat a claim as weaker or stronger because the figures can't test it."""
+
+MACRO_ORCHESTRATOR_PROMPT = """
+
+In this review, the statuses describe the stock's fit with the thesis, replacing those above:
+- VALIDATED: it directly serves a pillar and passes the thesis's tests, with no material \
+unresolved risk.
+- VALIDATED_WITH_RISKS: it directly serves a pillar and passes the thesis's tests, subject to \
+named risks.
+- NEEDS_REVISION: its link to a pillar is indirect or unclear, or it fails a test in a way that \
+could change.
+- REJECTED: it serves no pillar, or the evidence shows a shareholder is unlikely to benefit.
+
+Put the pillars it serves in thesis_pillars, using the names in the thesis, or leave it empty if \
+it serves none. Stocks are reviewed one at a time, so size this one on its own merits.
+
+Serving no pillar is not by itself a reason to sell, because the stock may have its own case \
+outside this thesis. In that situation propose HOLD and say that it needs its own reason to be \
+held. Propose TRIM or SELL only when the evidence shows a shareholder is unlikely to benefit."""
+
 DIGEST_PROMPT = """\
 You extract investment evidence from long documents such as earnings transcripts and 10-Ks. \
 Summarise what bears on the thesis: guidance, segment figures, margins, debt, risk factors, and \
@@ -95,12 +125,19 @@ class Council:
     digest_cache_ttl: CacheTtl
 
 
-def build_council(model: Model, digest_cache_ttl: CacheTtl = "5m") -> Council:
+def build_council(model: Model, digest_cache_ttl: CacheTtl = "5m", macro: bool = False) -> Council:
     """Build the agents. Output uses native structured output rather than a forced tool call.
 
     Only the digester uses prompt caching. On a measured run, caching the council's data saved
     nothing: its input is small, and agents with different output schemas can't share a cache.
+
+    Args:
+        model: The model every agent uses.
+        digest_cache_ttl: Prompt cache lifetime for document digests.
+        macro: Judge each stock against a macro thesis rather than a thesis about that company.
     """
+    suffix = MACRO_PROMPT if macro else ""
+    orchestrator_suffix = suffix + MACRO_ORCHESTRATOR_PROMPT if macro else ""
 
     def agent(name: str, output: type[Any], prompt: str) -> Agent[None, Any]:
         return Agent(
@@ -113,10 +150,12 @@ def build_council(model: Model, digest_cache_ttl: CacheTtl = "5m") -> Council:
         )
 
     return Council(
-        bull=agent("bull", AnalystView, BULL_PROMPT),
-        bear=agent("bear", AnalystView, BEAR_PROMPT),
-        quant=agent("quant", QuantView, QUANT_PROMPT),
-        orchestrator=agent("orchestrator", OrchestratorDecision, ORCHESTRATOR_PROMPT),
+        bull=agent("bull", AnalystView, BULL_PROMPT + suffix),
+        bear=agent("bear", AnalystView, BEAR_PROMPT + suffix),
+        quant=agent("quant", QuantView, QUANT_PROMPT + suffix),
+        orchestrator=agent(
+            "orchestrator", OrchestratorDecision, ORCHESTRATOR_PROMPT + orchestrator_suffix
+        ),
         digester=Agent(model, name="digester", output_type=str, instructions=DIGEST_PROMPT),
         digest_cache_ttl=digest_cache_ttl,
     )

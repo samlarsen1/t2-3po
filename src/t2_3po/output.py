@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import AnalystView, CouncilResult, Proposal
+from .models import AnalystView, CouncilResult, Proposal, ProposedAllocation, ThesisStatus
 from .pipeline import EvaluationContext
+from .stocks import Stock
 
 
 def _write_new(directory: Path, stem: str, suffix: str, text: str) -> Path:
@@ -56,12 +58,17 @@ def render_report(context: EvaluationContext, result: CouncilResult, proposal: P
     claims = "\n".join(
         f"| {c.claim} | {c.verdict} | {c.evidence} |" for c in result.quant.claim_checks
     )
+    pillars = (
+        f"Thesis pillars: {', '.join(decision.thesis_pillars)}.\n\n"
+        if decision.thesis_pillars
+        else ""
+    )
     return f"""# {proposal.ticker}: {proposal.thesis_status}
 
 {proposal.timestamp:%Y-%m-%d %H:%M} UTC, thesis `{proposal.thesis_file}`. Advisory output for \
 human review; nothing has been executed.
 
-## Summary
+{pillars}## Summary
 
 {decision.executive_summary}
 
@@ -132,6 +139,66 @@ def write_outputs(
         serialise_proposal(proposal),
     )
     return report, machine
+
+
+@dataclass(frozen=True)
+class StockReview:
+    """One stock's finished macro review."""
+
+    stock: Stock
+    context: EvaluationContext
+    result: CouncilResult
+    proposal: Proposal
+
+    def target(self) -> ProposedAllocation | None:
+        """The proposed allocation for this stock, if there is one."""
+        tickers = self.context.reviewed_tickers()
+        return next((a for a in self.proposal.proposed_allocations if a.ticker in tickers), None)
+
+
+def render_review_summary(thesis_name: str, reviews: list[StockReview], failed: list[str]) -> str:
+    """Render one table comparing every stock, best fit first, with the reasoning below it."""
+    ordered = sorted(reviews, key=lambda r: list(ThesisStatus).index(r.proposal.thesis_status))
+    rows = []
+    for review in ordered:
+        target = review.target()
+        pillars = ", ".join(review.result.decision.thesis_pillars) or "None"
+        action = f"{target.action} | {target.target_weight:.1%}" if target else "None | n/a"
+        suggested = next(
+            (u.strategy for u in review.proposal.suggested_config_updates),
+            review.stock.strategy,
+        )
+        rows.append(
+            f"| {review.stock.name} ({review.stock.symbol}) | {review.proposal.thesis_status} "
+            f"| {pillars} | {action} | {review.stock.strategy} | {suggested} |"
+        )
+    table = "\n".join(rows)
+    reasons = _bullets(
+        [f"**{r.stock.symbol}:** {r.result.decision.executive_summary}" for r in ordered]
+    )
+    total = sum(target.target_weight for r in reviews if (target := r.target()))
+    # Each stock is reviewed alone, so nothing else stops the targets adding up to too much.
+    warnings = [f"Target weights add up to {total:.1%} of the ISA. Each stock was sized alone."]
+    warnings += [f"Review failed, so this stock isn't included: {symbol}." for symbol in failed]
+    return f"""# Macro review against `{thesis_name}`
+
+{len(reviews)} stocks reviewed. Advisory output for human review; nothing has been executed.
+
+{_bullets(warnings)}
+
+| Stock | Fit | Pillars | Action | Target weight | Strategy now | Suggested |
+|---|---|---|---|---|---|---|
+{table}
+
+## Why
+
+{reasons}
+"""
+
+
+def write_review_summary(summary: str, timestamp: datetime, reports_dir: Path) -> Path:
+    """Write ``YYYY-MM-DD_macro_review.md``."""
+    return _write_new(reports_dir, f"{timestamp:%Y-%m-%d}_macro_review", ".md", summary)
 
 
 def serialise_proposal(proposal: Proposal) -> str:

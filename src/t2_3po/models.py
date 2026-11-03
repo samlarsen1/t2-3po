@@ -71,6 +71,10 @@ class OrchestratorDecision(BaseModel):
     """The Protocol Officer's synthesis of the council's debate."""
 
     thesis_status: ThesisStatus
+    thesis_pillars: list[str] = Field(
+        default_factory=list,
+        description="Macro reviews only: the thesis pillars this stock serves. Otherwise empty.",
+    )
     executive_summary: str
     critique: str = Field(description="Where the thesis holds, where it fails, and why.")
     key_risks: list[str]

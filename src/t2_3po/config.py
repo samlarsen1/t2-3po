@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Matches the largest max_portfolio_weight_pct in t2-d2's strategy.yaml (aggressive mode).
     max_position_weight: float = Field(default=0.175, gt=0, le=1)
 
+    macro_thesis_file: Path = Path("theses/macro/core.md")
+    stocks_file: Path = Path("../t2-d2/config/stocks.yaml")
+
     theses_dir: Path = Path("theses")
     reports_dir: Path = Path("reports")
     proposals_dir: Path = Path("proposals")
