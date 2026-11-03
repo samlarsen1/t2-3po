@@ -224,6 +224,7 @@ reports/
 proposals/
 exports/
 
-# Personal theses; only templates are tracked
+# Personal theses; only templates and the macro thesis are tracked
 theses/*
 !theses/*.example.md
+!theses/macro/
