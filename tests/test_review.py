@@ -1,4 +1,4 @@
-"""The macro review: one thesis checked against every stock in t2-d2's stocks file."""
+"""The macro review: every stock in t2-d2's stocks file profiled as a vehicle for one thesis."""
 
 import json
 from pathlib import Path
@@ -10,8 +10,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.profiles import ModelProfile
 
 from t2_3po import cli
-from t2_3po.agents import MACRO_ORCHESTRATOR_PROMPT, MACRO_PROMPT
+from t2_3po.agents import VEHICLE_PROMPT
 from t2_3po.market import MarketData
+from t2_3po.models import Proposal
 from t2_3po.stocks import Stock, StocksError, load_stocks, select_stocks
 
 STOCKS_YAML = """
@@ -29,62 +30,98 @@ watchlist:
   - {symbol: SPY, name: S&P 500 ETF}
 """
 
-ANALYST = {"summary": "A case.", "key_points": ["Point"], "conviction": "MEDIUM"}
-QUANT = {
-    "summary": "Mixed.",
-    "valuation_assessment": "Fair.",
-    "balance_sheet_assessment": "Strong.",
-    "claim_checks": [],
-}
 
-
-def _decision(ticker: str, status: str, pillars: list[str], weight: float) -> dict[str, Any]:
+def _profile(
+    ticker: str, status: str, role: str, pillars: list[str], weight: float, strategy: str | None
+) -> dict[str, Any]:
     return {
         "thesis_status": status,
         "thesis_pillars": pillars,
-        "executive_summary": f"{ticker} summary.",
-        "critique": "Critique.",
-        "key_risks": [],
-        "portfolio_warnings": [],
-        "proposed_allocations": [
-            {"ticker": ticker, "target_weight": weight, "action": "HOLD", "reasoning": "Why."}
-        ],
-        "suggested_config_updates": [],
+        "pillar_link": f"{ticker} link.",
+        "role": role,
+        "role_case": f"{ticker} role case.",
+        "key_metrics": [{"name": "Revenue CAGR", "value": "12%", "reading": "Steady growth."}],
+        "outlook": f"{ticker} outlook.",
+        "key_risks": [f"{ticker} risk."],
+        # Without the trailing dot, to check the allocation is pinned to the stock's own symbol.
+        "proposed_allocation": {
+            "ticker": ticker.rstrip("."),
+            "target_weight": weight,
+            "action": "HOLD",
+            "reasoning": "Why.",
+        },
+        "suggested_strategy": strategy,
+        "strategy_reasoning": "Because." if strategy else None,
     }
 
 
-DECISIONS = {
-    "NG.": _decision("NG.", "VALIDATED", ["Suppliers"], 0.6),
-    "RKLB": _decision("RKLB", "VALIDATED_WITH_RISKS", ["Space"], 0.5),
-    "HOOD": _decision("HOOD", "REJECTED", [], 0.0),
+PROFILES = {
+    "NG.": _profile("NG.", "VALIDATED", "STABILITY", ["Suppliers"], 0.06, None),
+    "RKLB": _profile("RKLB", "VALIDATED", "GROWTH", ["Space"], 0.05, "aggressive"),
+    # Robinhood is already on mild, so suggesting mild isn't a change.
+    "HOOD": _profile("HOOD", "REJECTED", "NEITHER", [], 0.0, "mild"),
+}
+
+OVERVIEW = {
+    "summary": "Space and suppliers are covered.",
+    "pillar_coverage": [
+        {"pillar": "Space", "stocks": ["RKLB"], "assessment": "One growth vehicle."},
+        {"pillar": "Fintech", "stocks": [], "assessment": "Not covered."},
+    ],
+    "growth_stability_balance": "Balanced.",
+    "overlaps": ["None found."],
+    "gaps": ["No fintech vehicle."],
 }
 
 
 class Recorder:
-    """Scripted council that records every agent's instructions and prompt."""
+    """Scripted review agents that record every agent's instructions and prompt."""
 
-    def __init__(self) -> None:
+    def __init__(self, overview_fails: bool = False) -> None:
+        self.overview_fails = overview_fails
         self.instructions: dict[str, str] = {}
-        self.prompts: list[str] = []
+        self.prompts: dict[str, list[str]] = {"vehicle": [], "overview": [], "council": []}
         self.model = FunctionModel(
             self._respond, profile=ModelProfile(supports_json_schema_output=True)
         )
 
     def _respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         prompt = str(messages[-1].parts[0].content)  # type: ignore[union-attr]
-        self.prompts.append(prompt)
         text = info.instructions or ""
-        ticker = prompt.split('<thesis ticker="')[1].split('"')[0]
-        if "You are the Lead Orchestrator" in text:
-            self.instructions["orchestrator"] = text
-            output: Any = DECISIONS[ticker]
-        elif "You are the Quantitative Analyst" in text:
-            self.instructions["quant"] = text
-            output = QUANT
+        if "You are the Vehicle Analyst" in text:
+            name, ticker = "vehicle", prompt.split('<thesis ticker="')[1].split('"')[0]
+            output: Any = PROFILES[ticker]
+        elif "You are the Portfolio Reviewer" in text:
+            name, output = "overview", ("not json" if self.overview_fails else OVERVIEW)
         else:
-            self.instructions["analyst"] = text
-            output = ANALYST
-        return ModelResponse(parts=[TextPart(json.dumps(output))])
+            name, output = "council", COUNCIL[text.split("You are the ")[1].split(" ")[0]]
+        self.instructions[name] = text
+        self.prompts[name].append(prompt)
+        return ModelResponse(
+            parts=[TextPart(output if isinstance(output, str) else json.dumps(output))]
+        )
+
+
+ANALYST = {"summary": "A case.", "key_points": ["Point"], "conviction": "MEDIUM"}
+COUNCIL: dict[str, Any] = {
+    "Bull": ANALYST,
+    "Bear": ANALYST,
+    "Quantitative": {
+        "summary": "Mixed.",
+        "valuation_assessment": "Fair.",
+        "balance_sheet_assessment": "Strong.",
+        "claim_checks": [],
+    },
+    "Lead": {
+        "thesis_status": "VALIDATED",
+        "executive_summary": "Summary.",
+        "critique": "Critique.",
+        "key_risks": [],
+        "portfolio_warnings": [],
+        "proposed_allocations": [],
+        "suggested_config_updates": [],
+    },
+}
 
 
 INFO = {"sector": "Utilities", "currentPrice": 100.0, "currency": "USD"}
@@ -161,7 +198,7 @@ def test_select_rejects_a_typo() -> None:
         select_stocks([_stock("HOOD", "HOOD_US_EQ")], ["HOOOD"])
 
 
-def test_every_stock_is_reviewed_against_the_macro_thesis(
+def test_every_stock_is_profiled_then_reviewed_together(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     recorder = Recorder()
@@ -170,37 +207,55 @@ def test_every_stock_is_reviewed_against_the_macro_thesis(
     assert _run(tmp_path, monkeypatch, recorder, "--dry-run", fetched=fetched) == 0
 
     assert sorted(fetched) == ["HOOD", "NG.L", "RKLB"]
-    assert all("Bullish on space and suppliers." in p for p in recorder.prompts)
+    assert len(recorder.prompts["vehicle"]) == 3
+    assert all("Bullish on space and suppliers." in p for p in recorder.prompts["vehicle"])
     assert any(
-        "RocketLab (RKLB), currently on the `moderate` strategy" in p for p in recorder.prompts
+        "RocketLab (RKLB), currently on the `moderate` strategy" in p
+        for p in recorder.prompts["vehicle"]
     )
-    assert MACRO_PROMPT in recorder.instructions["analyst"]
-    assert MACRO_PROMPT in recorder.instructions["quant"]
-    assert MACRO_ORCHESTRATOR_PROMPT in recorder.instructions["orchestrator"]
-    assert MACRO_ORCHESTRATOR_PROMPT not in recorder.instructions["analyst"]
+    assert recorder.prompts["council"] == []
+
+    [overview_prompt] = recorder.prompts["overview"]
+    assert "Bullish on space and suppliers." in overview_prompt
+    assert all(f'"symbol": "{s}"' in overview_prompt for s in ("NG.", "RKLB", "HOOD"))
 
     output = capsys.readouterr().out
-    assert "Thesis pillars: Suppliers." in output
+    assert "No fintech vehicle." in output
+    assert "| Fintech | None | Not covered. |" in output
     table = output[output.index("| Stock | Fit |") :]
-    assert table.index("National Grid") < table.index("RocketLab") < table.index("Robinhood")
-    assert "| National Grid (NG.) | VALIDATED | Suppliers | HOLD | 60.0% | mild | mild |" in table
-    assert "| Robinhood (HOOD) | REJECTED | None | HOLD | 0.0% | mild | mild |" in table
-    assert "Target weights add up to 110.0% of the ISA" in output
+    # Same status, so growth comes before stability; the rejected stock comes last.
+    assert table.index("RocketLab") < table.index("National Grid") < table.index("Robinhood")
+    assert (
+        "| RocketLab (RKLB) | VALIDATED | Space | GROWTH | HOLD | 5.0% | moderate | aggressive |"
+        in table
+    )
+    assert "| Robinhood (HOOD) | REJECTED | None | NEITHER | HOLD | 0.0% | mild | mild |" in table
+    assert "## National Grid (NG.): VALIDATED, STABILITY" in output
+    assert "Target weights add up to 11.0% of the ISA" in output
     assert sorted(p.name for p in tmp_path.iterdir()) == ["core.md", "stocks.yaml"]
 
 
-def test_orchestrator_is_told_not_to_sell_only_for_serving_no_pillar() -> None:
-    assert "Serving no pillar is not by itself a reason to sell" in MACRO_ORCHESTRATOR_PROMPT
+def test_vehicle_analyst_is_told_not_to_sell_only_for_serving_no_pillar() -> None:
+    assert "Serving no pillar is not by itself a reason to sell" in VEHICLE_PROMPT
 
 
-def test_a_real_run_writes_each_report_and_the_summary(
+def test_a_real_run_writes_one_report_and_a_proposal_per_stock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert _run(tmp_path, monkeypatch, Recorder()) == 0
 
-    reports = sorted(p.name.split("_", 1)[1] for p in (tmp_path / "reports").iterdir())
-    assert reports == ["HOOD.md", "NG.md", "RKLB.md", "macro_review.md"]
-    assert len(list((tmp_path / "proposals").glob("proposal_*.json"))) == 3
+    reports = [p.name.split("_", 1)[1] for p in (tmp_path / "reports").iterdir()]
+    assert reports == ["macro_review.md"]
+    proposals = [
+        Proposal.model_validate_json(p.read_text())
+        for p in (tmp_path / "proposals").glob("proposal_*.json")
+    ]
+    by_ticker = {p.ticker: p for p in proposals}
+    assert sorted(by_ticker) == ["HOOD", "NG.", "RKLB"]
+    assert by_ticker["NG."].proposed_allocations[0].ticker == "NG."
+    assert [u.strategy for u in by_ticker["RKLB"].suggested_config_updates] == ["aggressive"]
+    assert by_ticker["HOOD"].suggested_config_updates == []
+    assert by_ticker["NG."].thesis_file == "core.md"
 
 
 def test_only_limits_the_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,13 +269,28 @@ def test_only_limits_the_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_one_failed_stock_keeps_the_others_and_is_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert _run(tmp_path, monkeypatch, Recorder(), failing="RKLB") == 1
+    recorder = Recorder()
 
-    assert "Review failed, so this stock isn't included: RKLB." in capsys.readouterr().out
-    reports = sorted(p.name.split("_", 1)[1] for p in (tmp_path / "reports").iterdir())
-    assert reports == ["HOOD.md", "NG.md", "macro_review.md"]
+    assert _run(tmp_path, monkeypatch, recorder, failing="RKLB") == 1
+
+    [report] = (tmp_path / "reports").iterdir()
+    assert "Review failed, so this stock isn't included: RKLB." in report.read_text()
+    assert '"symbol": "RKLB"' not in recorder.prompts["overview"][0]
+    assert len(list((tmp_path / "proposals").iterdir())) == 2
+
+
+def test_a_failed_overview_still_writes_the_profiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _run(tmp_path, monkeypatch, Recorder(overview_fails=True)) == 1
+
+    [report] = (tmp_path / "reports").iterdir()
+    text = report.read_text()
+    assert "The overview failed" in text
+    assert "## RocketLab (RKLB): VALIDATED, GROWTH" in text
+    assert len(list((tmp_path / "proposals").iterdir())) == 3
 
 
 def test_a_typo_in_only_fails_before_any_spend(
@@ -231,10 +301,10 @@ def test_a_typo_in_only_fails_before_any_spend(
     assert _run(tmp_path, monkeypatch, recorder, "--only", "HOOOD") == 1
 
     assert "HOOOD" in capsys.readouterr().err
-    assert recorder.prompts == []
+    assert recorder.prompts == {"vehicle": [], "overview": [], "council": []}
 
 
-def test_evaluate_council_has_no_macro_instructions(
+def test_evaluate_still_runs_the_full_council(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorder = Recorder()
@@ -246,5 +316,5 @@ def test_evaluate_council_has_no_macro_instructions(
 
     assert cli.main(["evaluate", str(thesis), "--no-portfolio", "--dry-run"]) == 0
 
-    assert MACRO_PROMPT not in recorder.instructions["analyst"]
-    assert MACRO_ORCHESTRATOR_PROMPT not in recorder.instructions["orchestrator"]
+    assert len(recorder.prompts["council"]) == 4
+    assert recorder.prompts["vehicle"] == []

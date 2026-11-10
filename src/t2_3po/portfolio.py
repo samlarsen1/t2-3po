@@ -6,10 +6,12 @@ figures in a warning are always computed.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from pydantic import BaseModel
 
 from .market import MarketData, to_yahoo_symbol
-from .models import Action, OrchestratorDecision
+from .models import Action, ProposedAllocation
 from .t212 import ReadOnlyTrading212Client
 
 UNKNOWN_SECTOR = "Unknown"
@@ -110,7 +112,7 @@ def concentration_warnings(snapshot: PortfolioSnapshot, limits: Limits) -> list[
 
 
 def decision_warnings(
-    decision: OrchestratorDecision,
+    allocations: Iterable[ProposedAllocation],
     snapshot: PortfolioSnapshot | None,
     limits: Limits,
     reviewed_tickers: set[str],
@@ -119,7 +121,7 @@ def decision_warnings(
     """Check the model's proposals against the limits and the actual portfolio.
 
     Args:
-        decision: The Protocol Officer's output.
+        allocations: The proposed allocations.
         snapshot: Current portfolio, or ``None`` if it wasn't evaluated.
         limits: Concentration limits.
         reviewed_tickers: Every code for the ticker under review.
@@ -129,7 +131,7 @@ def decision_warnings(
         Warnings for the human reviewer. Proposals are flagged, never silently altered.
     """
     warnings: list[str] = []
-    for allocation in decision.proposed_allocations:
+    for allocation in allocations:
         ticker = allocation.ticker
         if allocation.target_weight > limits.max_position_weight:
             warnings.append(

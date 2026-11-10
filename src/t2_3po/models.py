@@ -71,10 +71,6 @@ class OrchestratorDecision(BaseModel):
     """The Protocol Officer's synthesis of the council's debate."""
 
     thesis_status: ThesisStatus
-    thesis_pillars: list[str] = Field(
-        default_factory=list,
-        description="Macro reviews only: the thesis pillars this stock serves. Otherwise empty.",
-    )
     executive_summary: str
     critique: str = Field(description="Where the thesis holds, where it fails, and why.")
     key_risks: list[str]
@@ -90,6 +86,63 @@ class CouncilResult(BaseModel):
     bear: AnalystView
     quant: QuantView
     decision: OrchestratorDecision
+
+
+class VehicleRole(StrEnum):
+    """How a stock expresses the macro thesis."""
+
+    GROWTH = "GROWTH"
+    STABILITY = "STABILITY"
+    NEITHER = "NEITHER"
+
+
+class KeyMetric(BaseModel):
+    name: str
+    value: str = Field(
+        description="The figure with its units, as supplied or by simple arithmetic shown here."
+    )
+    reading: str = Field(description="What it says about the stock's role, in one sentence.")
+
+
+class VehicleProfile(BaseModel):
+    """The Vehicle Analyst's view of one stock as a way to express the macro thesis."""
+
+    thesis_status: ThesisStatus
+    thesis_pillars: list[str] = Field(
+        description="The pillars it serves, named as in the thesis. Empty if it serves none."
+    )
+    pillar_link: str = Field(
+        description="How the business serves those pillars, and how much of it does."
+    )
+    role: VehicleRole
+    role_case: str = Field(description="Why it fits that role, or why it fits neither.")
+    key_metrics: list[KeyMetric] = Field(description="The four to eight metrics that decide it.")
+    outlook: str = Field(
+        description="Over the thesis horizon: what has to happen for the stock to do its job, "
+        "and what would show it isn't."
+    )
+    key_risks: list[str]
+    proposed_allocation: ProposedAllocation
+    suggested_strategy: Literal["mild", "moderate", "aggressive"] | None = Field(
+        description="A new t2-d2 strategy, only if the verdict justifies a change. Otherwise null."
+    )
+    strategy_reasoning: str | None = None
+
+
+class PillarCoverage(BaseModel):
+    pillar: str
+    stocks: list[str] = Field(description="Symbols of the stocks that serve it.")
+    assessment: str = Field(description="How well it is covered, and by what kind of vehicle.")
+
+
+class ReviewOverview(BaseModel):
+    """The Portfolio Reviewer's view across every stock."""
+
+    summary: str
+    pillar_coverage: list[PillarCoverage]
+    growth_stability_balance: str
+    overlaps: list[str] = Field(description="Stocks that depend on the same driver, and which.")
+    gaps: list[str] = Field(description="Pillars or kinds of exposure with no viable vehicle.")
 
 
 class Proposal(BaseModel):

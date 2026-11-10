@@ -11,27 +11,30 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UnexpectedModelBehavior
+from pydantic_ai.models import Model
 
-from .agents import Council, build_council, build_model
+from .agents import build_council, build_model, build_review_agents, profile_vehicle
 from .config import Settings
 from .market import MarketData, MarketDataError
-from .output import (
-    StockReview,
-    export_approved,
-    render_report,
-    render_review_summary,
-    write_outputs,
-    write_review_summary,
-)
+from .output import export_approved, render_report, write_outputs, write_proposal
 from .pipeline import build_proposal, evaluate, gather_context
 from .portfolio import Limits, PortfolioSnapshot, fetch_snapshot
+from .review import (
+    StockReview,
+    build_vehicle_proposal,
+    gather_profiles,
+    overview_or_none,
+    render_review,
+    stock_thesis,
+    write_review,
+)
 from .stocks import Stock, StocksError, load_stocks, select_stocks
 from .t212 import ReadOnlyTrading212Client, Trading212Error
-from .thesis import Thesis, ThesisError, ThesisMeta, discover_theses, parse_thesis, read_document
+from .thesis import ThesisError, discover_theses, parse_thesis, read_document
 
 logger = logging.getLogger("t2_3po")
 
-MAX_CONCURRENT_REVIEWS = 3
+MAX_CONCURRENT_REVIEWS = 5
 
 _EVALUATION_ERRORS = (
     ThesisError,
@@ -56,11 +59,11 @@ async def _load_portfolio(settings: Settings, market: MarketData) -> PortfolioSn
 
 
 async def _setup(
-    args: argparse.Namespace, settings: Settings, macro: bool = False
-) -> tuple[Council, MarketData, Limits, PortfolioSnapshot | None] | None:
+    args: argparse.Namespace, settings: Settings
+) -> tuple[Model, MarketData, Limits, PortfolioSnapshot | None] | None:
     """Build what every evaluation needs, or print the problem and return ``None``."""
     try:
-        council = build_council(build_model(settings), settings.digest_cache_ttl, macro=macro)
+        model = build_model(settings)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return None
@@ -77,7 +80,7 @@ async def _setup(
         except Trading212Error as exc:
             print(f"Portfolio error: {exc}", file=sys.stderr)
             return None
-    return council, market, limits, portfolio
+    return model, market, limits, portfolio
 
 
 async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
@@ -89,7 +92,8 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
     setup = await _setup(args, settings)
     if setup is None:
         return 1
-    council, market, limits, portfolio = setup
+    model, market, limits, portfolio = setup
+    council = build_council(model, settings.digest_cache_ttl)
 
     failures = 0
     for path in paths:
@@ -113,22 +117,6 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
     return 1 if failures else 0
 
 
-def _stock_thesis(path: Path, macro_thesis: str, stock: Stock) -> Thesis:
-    """Pair the macro thesis with one stock, so the normal pipeline can evaluate it."""
-    return Thesis(
-        path=path,
-        meta=ThesisMeta(
-            ticker=stock.symbol,
-            t212_ticker=stock.t212_ticker,
-            yahoo_ticker=stock.yahoo_symbol,
-        ),
-        body=(
-            f"{macro_thesis.strip()}\n\n## Stock under review\n\n{stock.name} ({stock.symbol}), "
-            f"currently on the `{stock.strategy}` strategy in t2-d2."
-        ),
-    )
-
-
 async def _review(args: argparse.Namespace, settings: Settings) -> int:
     thesis_path = Path(args.thesis) if args.thesis else settings.macro_thesis_file
     stocks_path = Path(args.stocks) if args.stocks else settings.stocks_file
@@ -139,47 +127,40 @@ async def _review(args: argparse.Namespace, settings: Settings) -> int:
         print(f"Review error: {exc}", file=sys.stderr)
         return 1
 
-    setup = await _setup(args, settings, macro=True)
+    setup = await _setup(args, settings)
     if setup is None:
         return 1
-    council, market, limits, portfolio = setup
-    print(f"Reviewing {len(stocks)} stocks against {thesis_path}: 4 Claude calls each.")
+    model, market, limits, portfolio = setup
+    agents = build_review_agents(model)
+    print(
+        f"Reviewing {len(stocks)} stocks against {thesis_path}: one Claude call each, "
+        "then one across all of them."
+    )
 
-    # Stocks run a few at a time, as one after another would take about 25 minutes for 18 stocks.
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_REVIEWS)
+    async def profile(stock: Stock) -> StockReview:
+        context = await gather_context(
+            stock_thesis(thesis_path, macro_thesis, stock), market, portfolio, limits
+        )
+        vehicle = await profile_vehicle(agents, context.render())
+        return StockReview(stock, context, vehicle, build_vehicle_proposal(stock, context, vehicle))
 
-    async def review(stock: Stock) -> StockReview | None:
-        async with semaphore:
-            try:
-                thesis = _stock_thesis(thesis_path, macro_thesis, stock)
-                context = await gather_context(thesis, market, portfolio, limits)
-                result = await evaluate(context, council)
-                proposal = build_proposal(context, result)
-                done = StockReview(stock, context, result, proposal)
-                if args.dry_run:
-                    print(render_report(context, result, proposal))
-                else:
-                    report, machine = write_outputs(
-                        context, result, proposal, settings.reports_dir, settings.proposals_dir
-                    )
-                    print(f"{stock.symbol}: {proposal.thesis_status}\n  {report}\n  {machine}")
-                return done
-            except _EVALUATION_ERRORS as exc:
-                # One failed stock shouldn't lose the other reviews, which have been paid for.
-                logger.error("review_failed stock=%s error=%s", stock.symbol, exc)
-                return None
-
-    outcomes = await asyncio.gather(*(review(stock) for stock in stocks))
-    reviews = [outcome for outcome in outcomes if outcome is not None]
-    failed = [s.symbol for s, outcome in zip(stocks, outcomes, strict=True) if outcome is None]
-    if reviews:
-        summary = render_review_summary(thesis_path.name, reviews, failed)
-        print(summary)
-        if not args.dry_run:
-            print(
-                write_review_summary(summary, reviews[0].proposal.timestamp, settings.reports_dir)
-            )
-    return 1 if failed else 0
+    reviews, failed = await gather_profiles(
+        stocks, profile, _EVALUATION_ERRORS, MAX_CONCURRENT_REVIEWS
+    )
+    if not reviews:
+        print("Every review failed, so there is nothing to report.", file=sys.stderr)
+        return 1
+    overview = await overview_or_none(agents, macro_thesis, reviews, _EVALUATION_ERRORS)
+    report = render_review(thesis_path.name, reviews, overview, failed, portfolio is not None)
+    if args.dry_run:
+        print(report)
+    else:
+        print(write_review(report, reviews[0].proposal.timestamp, settings.reports_dir))
+        for review in reviews:
+            path = write_proposal(review.proposal, settings.proposals_dir)
+            verdict = f"{review.profile.thesis_status}, {review.profile.role}"
+            print(f"{review.stock.symbol}: {verdict}\n  {path}")
+    return 1 if failed or overview is None else 0
 
 
 def _export(args: argparse.Namespace, settings: Settings) -> int:

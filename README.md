@@ -43,39 +43,72 @@ uv run t2-3po evaluate
 Each evaluation makes four Claude calls, plus one digest call per referenced document, and logs the
 token usage of each.
 
+### Running on a local model instead of Claude
+
+To avoid API costs, run every agent on a small open model served by [Ollama](https://ollama.com):
+
+```bash
+ollama pull qwen3:4b
+# Ollama's default context window is too small for the council's prompts
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve
+
+MODEL_PROVIDER=ollama uv run t2-3po evaluate theses/NVDA.md --dry-run
+```
+
+Set `OLLAMA_MODEL` to use another model, for example `qwen3:1.7b` on a machine with little memory.
+Prompt caching is turned off in this mode. A small local model reasons much less well than Claude
+and is more likely to fail its output schema, so treat its verdicts as a rough first pass.
+
 Add `--no-portfolio` to run without Trading212 credentials. Concentration isn't checked in that mode,
 and the proposal says so.
 
 ## Reviewing your stocks against a macro thesis
 
-`review` checks every traded stock in t2-d2's `config/stocks.yaml` against one macro thesis, on the
-horizon the thesis states. The watchlist is left out.
+`review` profiles every traded stock in t2-d2's `config/stocks.yaml` as a vehicle for one macro
+thesis, on the horizon the thesis states, then looks across all of them together. The watchlist is
+left out.
 
 ```bash
 # Try two stocks first
 uv run t2-3po review --only RIO HOOD --dry-run
 
-# Review every stock, then write the reports, proposals and a comparison table
+# Review every stock, then write the report and a proposal per stock
 uv run t2-3po review
 ```
 
 The thesis is plain markdown with no front matter, by default at `theses/macro/core.md`. Name its
 pillars, what would count as serving each one, and what would change your mind.
 
-Verdicts describe each stock's fit with the thesis. A stock that serves no pillar is `REJECTED`, which
-means it needs its own reason to be held rather than that it's a bad company. The council is told not
-to propose selling for that reason alone.
+For each stock, the Vehicle Analyst decides:
 
-Each stock makes four Claude calls, which cost about $0.15 on a measured run, and three stocks run at
-a time. Each is sized on its own, so the summary reports what the target weights add up to.
+- **Fit:** which pillars it serves and how much of the business does, as a verdict from `VALIDATED`
+  to `REJECTED`. A stock that serves no pillar is `REJECTED`, which means it needs its own reason to be
+  held rather than that it's a bad company. The analyst is told not to propose selling for that alone.
+- **Role:** `GROWTH` if shareholders benefit as the business grows with the theme, `STABILITY` if they
+  benefit from steady, cash-covered earnings and dividends, or `NEITHER`.
+- **Key metrics:** the four to eight figures that decide the role, such as revenue CAGR, cash runway
+  and break-even revenue for growth, or years profitable and dividend cover after capex for stability.
+- **Outlook:** what has to happen over the horizon, and what would show it isn't happening.
+- **Proposal:** a target weight and action, and a t2-d2 strategy change where the verdict justifies one.
+
+Alongside Yahoo's snapshot, the analyst gets four or five years of annual revenue, net income and free
+cash flow. Revenue CAGR and the counts of profitable and cash-positive years are computed in code.
+
+The Portfolio Reviewer then reads every profile and reports how well each pillar is covered, the
+balance between growth and stability vehicles, overlaps where stocks share a driver, and gaps.
+
+That's one Claude call per stock plus one more. On Haiku, all 18 stocks cost about $0.10 and took
+under four minutes on a measured run, with five stocks profiled at a time. Each stock is sized on its
+own, so the report says what the target weights add up to. For a full Bull, Bear and Quant debate on
+one stock, write a single-stock thesis and use `evaluate`.
 
 ## Output
 
 | File | Contents |
 |---|---|
-| `reports/YYYY-MM-DD_ticker.md` | Verdict, critique, risks, each analyst's case and the claim checks |
-| `reports/YYYY-MM-DD_macro_review.md` | `review` only: every stock compared in one table |
-| `proposals/proposal_YYYYMMDD.json` | The machine-readable proposal |
+| `reports/YYYY-MM-DD_ticker.md` | `evaluate`: verdict, critique, risks, each analyst's case and the claim checks |
+| `reports/YYYY-MM-DD_macro_review.md` | `review`: the overview, a comparison table, then each stock's profile and history |
+| `proposals/proposal_YYYYMMDD.json` | The machine-readable proposal, one per thesis or stock |
 
 A later run on the same day adds `_2`, `_3` and so on rather than overwriting. These directories are
 gitignored, along with single-stock theses, because they contain personal financial data. The macro
@@ -140,7 +173,7 @@ A thesis is a markdown file with YAML front matter. See
 | `ANTHROPIC_API_KEY` | | Required for `evaluate` and `review`, including with `--dry-run` |
 | `MACRO_THESIS_FILE` | `theses/macro/core.md` | The macro thesis for `review` |
 | `STOCKS_FILE` | `../t2-d2/config/stocks.yaml` | The stocks for `review` |
-| `CLAUDE_MODEL` | `claude-sonnet-5-5` | Model for every agent, including document digests |
+| `CLAUDE_MODEL` | `claude-haiku-5-5` | Model for every agent, including document digests. `claude-sonnet-5-5` reasons better at about 20x the cost |
 | `DIGEST_CACHE_TTL` | `5m` | Prompt cache lifetime for document digests: `5m`, `1h` or `off`. See [Prompt caching](#prompt-caching) |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
 | `MAX_POSITION_WEIGHT` | `0.175` | Position limit. The default is t2-d2's highest per-mode cap |

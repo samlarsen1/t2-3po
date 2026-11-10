@@ -8,8 +8,9 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,25 @@ class MarketDataError(Exception):
     """Yahoo Finance returned no usable data for a symbol."""
 
 
+# Key under which the default fetcher adds annual history to yfinance's ``info`` dict.
+ANNUAL_KEY = "_annual"
+
+
+class AnnualFigures(BaseModel):
+    """One financial year, in ``financial_currency``. ``None`` means Yahoo didn't report it."""
+
+    year_end: str
+    revenue: float | None = None
+    net_income: float | None = None
+    free_cash_flow: float | None = None
+
+
 class Fundamentals(BaseModel):
     """Fundamentals for one symbol. ``None`` means Yahoo didn't report that figure.
 
-    Per-share and valuation figures are in ``currency``. Cash, debt, cash flow and net income are
-    in ``financial_currency``, which can differ, e.g. RIO.L is quoted in GBp and reports in USD.
+    Per-share and valuation figures are in ``currency``. Cash, debt, cash flow, net income and the
+    annual history are in ``financial_currency``, which can differ, e.g. RIO.L is quoted in GBp and
+    reports in USD.
     """
 
     symbol: str
@@ -65,6 +80,44 @@ class Fundamentals(BaseModel):
     week52_high: float | None = None
     week52_low: float | None = None
     sma_200d: float | None = None
+    dividend_yield: float | None = None
+    payout_ratio: float | None = None
+    annual: list[AnnualFigures] = []
+
+    # Computed here rather than by the model, which makes arithmetic slips.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def revenue_cagr(self) -> float | None:
+        """Compound annual revenue growth from the oldest to the latest year in ``annual``.
+
+        ``annual`` runs latest first, so the list index counts years back from the latest.
+        """
+        revenues = [(i, a.revenue) for i, a in enumerate(self.annual) if a.revenue is not None]
+        if len(revenues) < 2:
+            return None
+        (latest_i, latest), (oldest_i, oldest) = revenues[0], revenues[-1]
+        if oldest <= 0 or latest <= 0:
+            return None
+        return float((latest / oldest) ** (1 / (oldest_i - latest_i)) - 1)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def profitable_years(self) -> str | None:
+        """How many reported years had positive net income, e.g. ``"3 of 4"``."""
+        return _count_positive([a.net_income for a in self.annual])
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def positive_fcf_years(self) -> str | None:
+        """How many reported years had positive free cash flow, e.g. ``"4 of 4"``."""
+        return _count_positive([a.free_cash_flow for a in self.annual])
+
+
+def _count_positive(values: list[float | None]) -> str | None:
+    known = [v for v in values if v is not None]
+    if not known:
+        return None
+    return f"{sum(v > 0 for v in known)} of {len(known)}"
 
 
 def to_yahoo_symbol(t212_ticker: str) -> str | None:
@@ -139,11 +192,62 @@ def fundamentals_from_info(symbol: str, info: dict[str, Any]) -> Fundamentals:
         week52_high=info.get("fiftyTwoWeekHigh"),
         week52_low=info.get("fiftyTwoWeekLow"),
         sma_200d=info.get("twoHundredDayAverage"),
+        dividend_yield=_dividend_yield(info),
+        payout_ratio=_payout_ratio(info),
+        annual=[AnnualFigures.model_validate(row) for row in info.get(ANNUAL_KEY, [])],
     )
 
 
+def _dividend_yield(info: dict[str, Any]) -> float | None:
+    # Yahoo reports dividendYield as a percentage. trailingAnnualDividendYield is a ratio, but is
+    # wrong by 100x for stocks quoted in pence, so it isn't used.
+    value = info.get("dividendYield")
+    return None if value is None else float(value) / 100
+
+
+def _payout_ratio(info: dict[str, Any]) -> float | None:
+    # A payout ratio on a loss is meaningless: Yahoo reports 35.5 for TRIG.L, for example.
+    value, eps = info.get("payoutRatio"), info.get("trailingEps")
+    if value is None or eps is None or eps <= 0:
+        return None
+    return float(value)
+
+
+def _row(frame: pd.DataFrame, label: str, column: Any) -> float | None:
+    if label not in frame.index or column not in frame.columns:
+        return None
+    value = frame.at[label, column]
+    return None if pd.isna(value) else float(value)
+
+
+def annual_figures(income: pd.DataFrame, cashflow: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert yfinance's annual income and cash flow statements, latest year first.
+
+    Yahoo pads the oldest column with blanks for some companies, so years with no figures at all
+    are dropped.
+    """
+    years = sorted(set(income.columns) | set(cashflow.columns), reverse=True)
+    rows = []
+    for year in years:
+        row = {
+            "revenue": _row(income, "Total Revenue", year),
+            "net_income": _row(income, "Net Income", year),
+            "free_cash_flow": _row(cashflow, "Free Cash Flow", year),
+        }
+        if any(value is not None for value in row.values()):
+            rows.append({"year_end": pd.Timestamp(year).date().isoformat(), **row})
+    return rows
+
+
 def _fetch_yahoo_info(symbol: str) -> dict[str, Any]:
-    return dict(yf.Ticker(symbol).info)
+    ticker = yf.Ticker(symbol)
+    info = dict(ticker.info)
+    try:
+        info[ANNUAL_KEY] = annual_figures(ticker.income_stmt, ticker.cashflow)
+    # History helps but isn't essential, so a failure here shouldn't lose the snapshot.
+    except Exception as exc:
+        logger.warning("annual_history_failed symbol=%s error=%s", symbol, type(exc).__name__)
+    return info
 
 
 class MarketData:

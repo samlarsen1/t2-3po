@@ -111,7 +111,7 @@ def build_proposal(
     """Combine computed warnings with the model's, then add checks on its allocations."""
     decision = result.decision
     computed = decision_warnings(
-        decision,
+        decision.proposed_allocations,
         context.portfolio,
         context.limits,
         context.reviewed_tickers(),

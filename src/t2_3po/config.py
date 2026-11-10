@@ -9,6 +9,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 CacheTtl = Literal["off", "5m", "1h"]
+ModelProvider = Literal["anthropic", "ollama"]
 
 
 class Settings(BaseSettings):
@@ -20,9 +21,16 @@ class Settings(BaseSettings):
     t212_api_secret: SecretStr | None = None
     t212_base_url: str = "https://live.trading212.com"
 
+    model_provider: ModelProvider = "anthropic"
+
     anthropic_api_key: SecretStr | None = None
-    claude_model: str = "claude-sonnet-5-5"
+    # Haiku is about 20x cheaper than Sonnet. claude-sonnet-5-5 reasons better.
+    claude_model: str = "claude-haiku-5-5"
     digest_cache_ttl: CacheTtl = "5m"
+
+    # A local model served by Ollama, used when MODEL_PROVIDER=ollama. Free, but much weaker.
+    ollama_model: str = "qwen3:4b"
+    ollama_base_url: str = "http://localhost:11434/v1"
 
     max_sector_weight: float = Field(default=0.30, gt=0, le=1)
     # Matches the largest max_portfolio_weight_pct in t2-d2's strategy.yaml (aggressive mode).

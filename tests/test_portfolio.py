@@ -120,7 +120,12 @@ def test_no_warnings_when_within_limits() -> None:
 
 def test_consistent_trim_has_no_decision_warnings() -> None:
     decision = _decision(_allocation("NVDA", 0.08, Action.TRIM))
-    assert decision_warnings(decision, _snapshot(), LIMITS, REVIEWED, "Technology") == []
+    assert (
+        decision_warnings(
+            decision.proposed_allocations, _snapshot(), LIMITS, REVIEWED, "Technology"
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -137,13 +142,17 @@ def test_consistent_trim_has_no_decision_warnings() -> None:
 def test_decision_warnings_flag_bad_proposals(
     allocation: ProposedAllocation, expected: str
 ) -> None:
-    warnings = decision_warnings(_decision(allocation), _snapshot(), LIMITS, REVIEWED, "Technology")
+    warnings = decision_warnings(
+        _decision(allocation).proposed_allocations, _snapshot(), LIMITS, REVIEWED, "Technology"
+    )
     assert any(expected in warning for warning in warnings)
 
 
 def test_new_position_uses_reviewed_sector_for_projection() -> None:
     decision = _decision(_allocation("MU", 0.05, Action.BUY))
-    warnings = decision_warnings(decision, _snapshot(), LIMITS, {"MU"}, "Technology")
+    warnings = decision_warnings(
+        decision.proposed_allocations, _snapshot(), LIMITS, {"MU"}, "Technology"
+    )
     assert warnings == [
         "Proposed BUY of MU takes Technology sector to 40.0%, above the 30% ISA limit threshold."
     ]
@@ -151,5 +160,7 @@ def test_new_position_uses_reviewed_sector_for_projection() -> None:
 
 def test_position_cap_still_checked_without_portfolio() -> None:
     decision = _decision(_allocation("NVDA", 0.5, Action.BUY))
-    warnings = decision_warnings(decision, None, LIMITS, REVIEWED, "Technology")
+    warnings = decision_warnings(
+        decision.proposed_allocations, None, LIMITS, REVIEWED, "Technology"
+    )
     assert warnings == ["Proposed NVDA target weight 50.0% exceeds 17.5% single-position limit."]
