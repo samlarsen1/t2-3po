@@ -1,0 +1,79 @@
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
+repos:
+  # Runs at commit-msg so `pre-commit run --all-files` still works on main
+  - repo: local
+    hooks:
+      - id: branch-name
+        name: branch name
+        entry: >-
+          bash -c 'branch=$(git symbolic-ref --short -q HEAD) || exit 0;
+          [[ "$branch" =~ ^((feature|bug|task|hotfix)/[a-z0-9]+(-[a-z0-9]+)*|dependabot/.+)$ ]] && exit 0;
+          echo "Branch \"$branch\" must be feature/<name>, bug/<name>, task/<name> or hotfix/<name>,
+          where <name> is lowercase-with-hyphens, or a dependabot/ branch. Commit on a new branch instead:
+          git switch -c task/my-change"; exit 1'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit-msg]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  # --- Security: vulnerability scanning (blocks the commit on findings) ---
+
+  # SAST: Python-specific insecure patterns (injection, unsafe deserialisation, weak crypto, ...)
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.4
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml, --severity-level, medium]
+        additional_dependencies: ["bandit[toml]"]
+
+  # SAST: OWASP Top 10 ruleset (fetches rules from the Semgrep registry; no login needed)
+  - repo: https://github.com/semgrep/pre-commit
+    rev: v1.183.0
+    hooks:
+      - id: semgrep
+        args: [--config, p/owasp-top-ten, --config, p/python, --error, --skip-unknown-extensions, --metrics, "off"]
+
+  - repo: local
+    hooks:
+      # SCA: audit every locked dependency in uv.lock against the PyPI/OSV advisory databases
+      - id: pip-audit
+        name: pip-audit
+        entry: >-
+          bash -c 'uv export --frozen --no-emit-project --no-hashes
+          --format requirements-txt -o "${TMPDIR:-/tmp}/t2-3po-requirements.txt" >/dev/null
+          && .venv/bin/pip-audit --strict --disable-pip --no-deps
+          -r "${TMPDIR:-/tmp}/t2-3po-requirements.txt"'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: .venv/bin/python -m mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: pytest
+        name: pytest
+        entry: .venv/bin/python -m pytest
+        args: [-v]
+        language: system
+        pass_filenames: false
+        types: [python]
