@@ -298,7 +298,7 @@ def test_a_typo_in_only_fails_before_any_spend(
 ) -> None:
     recorder = Recorder()
 
-    assert _run(tmp_path, monkeypatch, recorder, "--only", "HOOOD") == 1
+    assert _run(tmp_path, monkeypatch, recorder, "--only", "HOOOD") == 2
 
     assert "HOOOD" in capsys.readouterr().err
     assert recorder.prompts == {"vehicle": [], "overview": [], "council": []}

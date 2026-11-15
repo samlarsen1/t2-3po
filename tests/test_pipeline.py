@@ -11,7 +11,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.profiles import ModelProfile
 
-from t2_3po import cli
+from t2_3po import cli, t2contract
 from t2_3po.agents import build_council
 from t2_3po.market import MarketData, MarketDataError
 from t2_3po.output import export_approved, render_report, write_outputs
@@ -286,7 +286,7 @@ def test_cli_evaluate_requires_google_key_before_any_lookup(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-    assert cli.main(["evaluate", str(thesis), "--no-portfolio"]) == 1
+    assert cli.main(["evaluate", str(thesis), "--no-portfolio"]) == 2
     assert "GOOGLE_API_KEY" in capsys.readouterr().err
 
 
@@ -332,5 +332,57 @@ def test_cli_dry_run_requires_google_key(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-    assert cli.main(["evaluate", str(thesis), "--no-portfolio", "--dry-run"]) == 1
+    assert cli.main(["evaluate", str(thesis), "--no-portfolio", "--dry-run"]) == 2
     assert "GOOGLE_API_KEY" in capsys.readouterr().err
+
+
+def _reports(base: Path, command: str) -> list[dict[str, Any]]:
+    return [json.loads(p.read_text()) for p in sorted((base / "runs").glob(f"*-{command}.json"))]
+
+
+def test_evaluate_writes_a_contract_run_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, t2_contract_dirs: Path
+) -> None:
+    assert _run_cli(tmp_path, monkeypatch, ScriptedModels()) == 0
+
+    [report] = _reports(t2_contract_dirs, "evaluate")
+    assert (report["droid"], report["status"], report["dry_run"]) == ("t2-3po", "ok", None)
+    [evaluation] = report["result"]["evaluations"]
+    assert evaluation["ticker"] == "NVDA"
+    assert evaluation["proposal"].endswith(".json")
+    assert report["result"]["portfolio"] is False
+
+
+def test_missing_key_is_reported_as_a_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, t2_contract_dirs: Path
+) -> None:
+    thesis = tmp_path / "NVDA.md"
+    thesis.write_text("---\nticker: NVDA\n---\nBody")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    cli.main(["evaluate", str(thesis), "--no-portfolio"])
+    [report] = _reports(t2_contract_dirs, "evaluate")
+    assert report["status"] == "config_error"
+    assert "GOOGLE_API_KEY" in report["summary"]
+
+
+def test_a_running_evaluation_blocks_a_second_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, t2_contract_dirs: Path
+) -> None:
+    models = ScriptedModels()
+    # flock locks belong to an open file, so the run's own open conflicts with this one.
+    with t2contract.run_lock("t2-3po"):
+        assert _run_cli(tmp_path, monkeypatch, models) == 3
+    assert models.prompts == {}
+    [report] = _reports(t2_contract_dirs, "evaluate")
+    assert report["status"] == "skipped"
+
+
+def test_export_writes_a_run_report_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, t2_contract_dirs: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["export", str(tmp_path / "p.json")]) == 2
+    [report] = _reports(t2_contract_dirs, "export")
+    assert report["status"] == "config_error"

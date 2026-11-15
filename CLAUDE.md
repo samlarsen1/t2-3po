@@ -22,6 +22,7 @@ shared droid contract (run reports, exit codes, locks) are agreed in `t2-hq` fir
 - **Free models only.** The council runs on Gemini's free tier or a local Ollama model
   (`MODEL_PROVIDER=google|ollama`). Don't add a paid provider. Keep Gemini requests paced and
   retried (`pacing.py`, `GEMINI_RETRY` in `agents.py`) so a run stays inside the free tier's limits.
+- **Follow the T2 droid contract** (t2-hq `CONTRACT.md`): every run writes a run report and exits 0/1/2/3, runs take the run lock and the shared `t212_lock()` while fetching the portfolio. `t2contract.py` is vendored from t2-hq: never edit it here; change it in t2-hq and run `bin/t2-contract sync`.
 - **Never create, read or edit `.env`.** Document variables in `.env.example` with placeholders.
 - Tests make no network or model calls: use mock transports or `FunctionModel`.
 - Commit only on `feature/<name>`, `bug/<name>`, `task/<name>` or `hotfix/<name>` branches.
