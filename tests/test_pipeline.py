@@ -278,16 +278,16 @@ def test_cli_export_rejects_invalid_proposal(
     assert cli.main(["export", str(bad), "--approve"]) == 1
 
 
-def test_cli_evaluate_requires_anthropic_key_before_any_lookup(
+def test_cli_evaluate_requires_google_key_before_any_lookup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     thesis = tmp_path / "NVDA.md"
     thesis.write_text("---\nticker: NVDA\n---\nBody")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     assert cli.main(["evaluate", str(thesis), "--no-portfolio"]) == 1
-    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+    assert "GOOGLE_API_KEY" in capsys.readouterr().err
 
 
 def _run_cli(
@@ -324,13 +324,13 @@ def test_cli_without_dry_run_writes_report_and_proposal(
     assert len(list((tmp_path / "proposals").glob("proposal_*.json"))) == 1
 
 
-def test_cli_dry_run_requires_anthropic_key(
+def test_cli_dry_run_requires_google_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     thesis = tmp_path / "NVDA.md"
     thesis.write_text("---\nticker: NVDA\n---\nBody")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     assert cli.main(["evaluate", str(thesis), "--no-portfolio", "--dry-run"]) == 1
-    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+    assert "GOOGLE_API_KEY" in capsys.readouterr().err

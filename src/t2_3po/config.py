@@ -8,8 +8,7 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-CacheTtl = Literal["off", "5m", "1h"]
-ModelProvider = Literal["anthropic", "ollama"]
+ModelProvider = Literal["google", "ollama"]
 
 
 class Settings(BaseSettings):
@@ -21,14 +20,17 @@ class Settings(BaseSettings):
     t212_api_secret: SecretStr | None = None
     t212_base_url: str = "https://live.trading212.com"
 
-    model_provider: ModelProvider = "anthropic"
+    # Both choices are free: Gemini's free API tier, or a local model served by Ollama.
+    model_provider: ModelProvider = "google"
 
-    anthropic_api_key: SecretStr | None = None
-    # Haiku is about 20x cheaper than Sonnet. claude-sonnet-5-5 reasons better.
-    claude_model: str = "claude-haiku-5-5"
-    digest_cache_ttl: CacheTtl = "5m"
+    google_api_key: SecretStr | None = None
+    # An alias for Google's current Flash model, which the free tier covers.
+    gemini_model: str = "gemini-flash-latest"
+    # The free tier allows only a few requests a minute, so requests are spaced at least this far
+    # apart. 7s keeps a run under 10 requests a minute.
+    gemini_min_interval_seconds: float = Field(default=7.0, ge=0)
 
-    # A local model served by Ollama, used when MODEL_PROVIDER=ollama. Free, but much weaker.
+    # A local model served by Ollama, used when MODEL_PROVIDER=ollama. Private, but much weaker.
     ollama_model: str = "qwen3:4b"
     ollama_base_url: str = "http://localhost:11434/v1"
 

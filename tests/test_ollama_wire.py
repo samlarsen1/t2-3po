@@ -43,12 +43,12 @@ def _model(bodies: list[dict[str, Any]], text: str) -> OpenAIChatModel:
     return OpenAIChatModel("qwen3:4b", provider=provider)
 
 
-def test_build_model_uses_ollama_without_an_anthropic_key() -> None:
-    settings = Settings(model_provider="ollama", anthropic_api_key=None)
+def test_build_model_uses_ollama_without_a_google_key() -> None:
+    settings = Settings(model_provider="ollama", google_api_key=None)
     assert isinstance(build_model(settings), OpenAIChatModel)
 
 
-async def test_request_uses_json_schema_and_no_anthropic_settings() -> None:
+async def test_request_uses_json_schema() -> None:
     bodies: list[dict[str, Any]] = []
     result = await build_council(_model(bodies, json.dumps(VIEW))).bull.run("<thesis>x</thesis>")
 
@@ -56,12 +56,12 @@ async def test_request_uses_json_schema_and_no_anthropic_settings() -> None:
     body = bodies[0]
     assert body["model"] == "qwen3:4b"
     assert body["response_format"]["type"] == "json_schema"
-    assert not any("anthropic" in key or "effort" in key for key in body)
+    assert body["temperature"] == 0.3
 
 
-async def test_digest_skips_prompt_caching() -> None:
+async def test_digest_sends_the_document_then_the_thesis() -> None:
     bodies: list[dict[str, Any]] = []
-    council = build_council(_model(bodies, "Digest."), "1h")
-    assert council.digest_cache_ttl == "off"
-    await digest_document(council, "thesis", "10-K", "text")
-    assert "prompt_cache_breakpoint" not in json.dumps(bodies[0])
+    council = build_council(_model(bodies, "Digest."))
+    assert await digest_document(council, "my thesis", "10-K", "the text") == "Digest."
+    sent = json.dumps(bodies[0]["messages"])
+    assert sent.index("the text") < sent.index("my thesis")

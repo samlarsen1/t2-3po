@@ -30,7 +30,7 @@ cp .env.example .env    # then fill in your keys
 cp theses/NVDA.example.md theses/NVDA.md
 
 # Run the full evaluation and print the report, without writing any files.
-# This makes the same paid model calls as a normal run.
+# This makes the same model calls as a normal run.
 uv run t2-3po evaluate theses/NVDA.md --dry-run
 
 # Run the evaluation and write the report and proposal
@@ -40,12 +40,29 @@ uv run t2-3po evaluate theses/NVDA.md
 uv run t2-3po evaluate
 ```
 
-Each evaluation makes four Claude calls, plus one digest call per referenced document, and logs the
+Each evaluation makes four model calls, plus one digest call per referenced document, and logs the
 token usage of each.
 
-### Running on a local model instead of Claude
+### Choosing a model
 
-To avoid API costs, run every agent on a small open model served by [Ollama](https://ollama.com):
+Both options are free. `MODEL_PROVIDER` picks one.
+
+**Gemini on Google's free tier** (`MODEL_PROVIDER=google`, the default). Get a key from
+[Google AI Studio](https://aistudio.google.com/apikey) and set `GOOGLE_API_KEY`. `GEMINI_MODEL`
+defaults to `gemini-flash-latest`, Google's alias for its current Flash model.
+
+- **Rate limits.** The free tier allows only a few requests a minute and a daily quota. t2-3po starts
+  requests at least `GEMINI_MIN_INTERVAL_SECONDS` apart (7s by default, so under 10 a minute), even
+  when agents run in parallel, and retries a rate-limited or failed request up to four more times,
+  waiting 15s, then longer, up to 2 minutes. A `review` of 18 stocks takes about two and a half
+  minutes. If you still see 429 errors, raise the interval; if the daily quota runs out, the run fails
+  and can be repeated the next day.
+- **Privacy.** Google may use free-tier prompts and responses to improve its products. Prompts
+  contain your thesis, the stocks and your portfolio weights; with a portfolio they also contain
+  position values. Use `--no-portfolio` or Ollama to keep those private.
+
+**A local model served by [Ollama](https://ollama.com)** (`MODEL_PROVIDER=ollama`). Nothing leaves the
+machine, and there are no rate limits:
 
 ```bash
 ollama pull qwen3:4b
@@ -55,9 +72,9 @@ OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 MODEL_PROVIDER=ollama uv run t2-3po evaluate theses/NVDA.md --dry-run
 ```
 
-Set `OLLAMA_MODEL` to use another model, for example `qwen3:1.7b` on a machine with little memory.
-Prompt caching is turned off in this mode. A small local model reasons much less well than Claude
-and is more likely to fail its output schema, so treat its verdicts as a rough first pass.
+Set `OLLAMA_MODEL` to use another model, for example `qwen3:1.7b` on a machine with little memory. A
+small local model reasons much less well than Gemini Flash and is more likely to fail its output
+schema, so treat its verdicts as a rough first pass.
 
 Add `--no-portfolio` to run without Trading212 credentials. Concentration isn't checked in that mode,
 and the proposal says so.
@@ -97,8 +114,8 @@ cash flow. Revenue CAGR and the counts of profitable and cash-positive years are
 The Portfolio Reviewer then reads every profile and reports how well each pillar is covered, the
 balance between growth and stability vehicles, overlaps where stocks share a driver, and gaps.
 
-That's one Claude call per stock plus one more. On Haiku, all 18 stocks cost about $0.10 and took
-under four minutes on a measured run, with five stocks profiled at a time. Each stock is sized on its
+That's one model call per stock plus one more. Up to five stocks are profiled at a time, but on
+Gemini the requests are still spaced out to respect the free tier's limits. Each stock is sized on its
 own, so the report says what the target weights add up to. For a full Bull, Bear and Quant debate on
 one stock, write a single-stock thesis and use `evaluate`.
 
@@ -170,11 +187,14 @@ A thesis is a markdown file with YAML front matter. See
 |---|---|---|
 | `T212_API_KEY`, `T212_API_SECRET` | | Trading212 credentials. Use a key with read-only permissions |
 | `T212_BASE_URL` | `https://live.trading212.com` | Or `https://demo.trading212.com` |
-| `ANTHROPIC_API_KEY` | | Required for `evaluate` and `review`, including with `--dry-run` |
+| `MODEL_PROVIDER` | `google` | `google` (Gemini free tier) or `ollama` (local). See [Choosing a model](#choosing-a-model) |
+| `GOOGLE_API_KEY` | | Required with `MODEL_PROVIDER=google` for `evaluate` and `review`, including with `--dry-run` |
 | `MACRO_THESIS_FILE` | `theses/macro/core.md` | The macro thesis for `review` |
 | `STOCKS_FILE` | `../t2-d2/config/stocks.yaml` | The stocks for `review` |
-| `CLAUDE_MODEL` | `claude-haiku-5-5` | Model for every agent, including document digests. `claude-sonnet-5-5` reasons better at about 20x the cost |
-| `DIGEST_CACHE_TTL` | `5m` | Prompt cache lifetime for document digests: `5m`, `1h` or `off`. See [Prompt caching](#prompt-caching) |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model for every agent, including document digests |
+| `GEMINI_MIN_INTERVAL_SECONDS` | `7` | Minimum gap between the starts of two Gemini requests |
+| `OLLAMA_MODEL` | `qwen3:4b` | Local model, with `MODEL_PROVIDER=ollama` |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama server |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
 | `MAX_POSITION_WEIGHT` | `0.175` | Position limit. The default is t2-d2's highest per-mode cap |
 | `THESES_DIR`, `REPORTS_DIR`, `PROPOSALS_DIR`, `EXPORT_DIR` | `theses`, `reports`, `proposals`, `exports` | Directories |
@@ -185,7 +205,7 @@ Yahoo Finance data comes from `yfinance`, which needs no key.
 ## Development
 
 ```bash
-uv run pytest         # no network or API spend
+uv run pytest         # no network or model calls
 uv run ruff check .
 uv run ruff format .
 uv run mypy
@@ -229,23 +249,6 @@ uv sync
 | `dependency-audit.yml` | Daily, or `gh workflow run dependency-audit.yml` | `pip-audit` |
 
 Dependabot checks weekly for newer GitHub Actions versions.
-
-## Prompt caching
-
-Only document digests use prompt caching, so rerunning on the same document can reuse it even if the
-thesis has changed. Each agent's log line reports `usage_cache_read` and `usage_cache_write`.
-
-The council isn't cached. On a measured run, output made up 80% of the cost, and caching its small
-input saved nothing. Agents with different output schemas also can't share a cache.
-
-For Sonnet 5.5, a cache read costs 0.05× the normal input price. A write costs 1.25× with `5m` or 2×
-with `1h`, and a write that's never read back is a surcharge:
-
-| `DIGEST_CACHE_TTL` | Best for |
-|---|---|
-| `5m` | The default. Pays off if the document is read back at least once within 5 minutes |
-| `1h` | Repeated reruns with longer gaps. Needs at least two reads to pay off |
-| `off` | One-off digests, to avoid the write surcharge |
 
 ## Known limitations
 
