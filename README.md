@@ -3,24 +3,23 @@
 > *"Sir, the possibility of this tech allocation overconcentrating your ISA portfolio is
 > approximately 3,720 to 1!"*
 
-An asynchronous, multi-agent advisory engine for [t2-d2](https://github.com/samlarsen1/t2-d2), the
+An asynchronous, multi-agent advisory engine for `t2-d2`, the
 Trading212 execution engine. t2-3po reviews investment theses and writes recommendations for a human
 to approve. It can't place orders: its Trading212 client has no way to send anything but a GET.
 
 ## Part of the T2 system
 
-This repo is one of the T2 droids, coordinated from
-[t2-hq](https://github.com/samlarsen1/t2-hq), which holds the system
-[architecture](https://github.com/samlarsen1/t2-hq/blob/main/ARCHITECTURE.md) and
-[plan](https://github.com/samlarsen1/t2-hq/blob/main/PLAN.md).
+This repo is one of the T2 droids, coordinated from the `t2-hq` repo, which holds the system
+architecture (`ARCHITECTURE.md`) and plan (`PLAN.md`). All the T2 repos live under the same
+GitHub owner as this one.
 
 | Repo | Role |
 |---|---|
-| [t2-d2](https://github.com/samlarsen1/t2-d2) | buys dips; places buy orders on its own timers |
-| [t2-k2](https://github.com/samlarsen1/t2-k2) | harvests gains from overbought holdings; places sell orders |
-| [t2-bb8](https://github.com/samlarsen1/t2-bb8) | harvests the Trading212 instrument list; metadata only |
+| `t2-d2` | buys dips; places buy orders on its own timers |
+| `t2-k2` | harvests gains from overbought holdings; places sell orders |
+| `t2-bb8` | harvests the Trading212 instrument list; metadata only |
 | **t2-3po** (this repo) | advisory council; reviews theses, strategy and configuration; read-only |
-| [t2-hq](https://github.com/samlarsen1/t2-hq) | hub: plan, architecture, and the orchestrator and Telegram interface (planned) |
+| `t2-hq` | hub: plan, architecture, and the orchestrator and Telegram interface (planned) |
 
 t2-3po is the advisory layer. It reads the other droids' configuration and run reports and suggests changes, such as moving a stock in t2-d2 from `mild` to `moderate` or adding a holding. It never edits their files and never places orders. It runs on its own and doesn't need the other repos to be running.
 
