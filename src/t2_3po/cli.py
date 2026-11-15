@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,34 @@ from pydantic import ValidationError
 from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
 
-from .agents import build_council, build_model, build_review_agents, profile_vehicle
+from .advise import (
+    AdviceContext,
+    SuggestionStore,
+    check_draft,
+    finalize,
+    render_advice,
+    render_context,
+    reviewer_prompt,
+    since,
+)
+from .agents import (
+    build_advise_agents,
+    build_council,
+    build_model,
+    build_review_agents,
+    draft_advice,
+    profile_vehicle,
+    review_advice,
+)
 from .config import Settings
+from .configs import ConfigReadError, load_d2, load_k2
+from .instruments import Instruments, InstrumentsError
 from .market import MarketData, MarketDataError
-from .output import export_approved, render_report, write_outputs, write_proposal
+from .models import Droid, Status
+from .output import export_approved, render_report, write_new, write_outputs, write_proposal
 from .pipeline import build_proposal, evaluate, gather_context
 from .portfolio import Limits, PortfolioSnapshot, fetch_snapshot
+from .prices import PriceHistory, StockStats, dip_days
 from .review import (
     StockReview,
     build_vehicle_proposal,
@@ -35,6 +58,7 @@ from .review import (
     stock_thesis,
     write_review,
 )
+from .runlog import D2Activity, d2_activity, k2_latest, load_reports
 from .stocks import Stock, StocksError, load_stocks, select_stocks
 from .t2contract import Exit, RunReport, Skipped, run_lock, t212_lock
 from .t212 import ReadOnlyTrading212Client, Trading212Error
@@ -257,6 +281,195 @@ def _export(args: argparse.Namespace, settings: Settings, report: RunReport) -> 
     return report.finish(Exit.OK, f"exported {args.proposal}", {"export": str(exported)})
 
 
+_DROIDS: dict[str, Droid] = {"d2": "t2-d2", "k2": "t2-k2"}
+
+
+async def _advice_context(
+    args: argparse.Namespace,
+    settings: Settings,
+    portfolio: PortfolioSnapshot | None,
+    prices: PriceHistory,
+    now: datetime,
+) -> AdviceContext:
+    """Gather the facts for the advice. Raises ConfigReadError or ThesisError on bad input."""
+    droids: list[Droid] = [_DROIDS[args.only]] if args.only else ["t2-d2", "t2-k2"]
+    notes: list[str] = []
+    d2 = load_d2(settings.d2_dir) if "t2-d2" in droids else None
+    k2 = load_k2(settings.k2_dir) if "t2-k2" in droids else None
+    thesis = read_document(settings.macro_thesis_file)
+
+    instruments = None
+    if d2 is not None:
+        try:
+            instruments = Instruments.load(settings.bb8_dir)
+        except InstrumentsError as exc:
+            notes.append(f"New holdings can't be checked, so none are suggested: {exc}")
+
+    stats: dict[str, StockStats | None] = {}
+    days: dict[str, dict[str, int | None]] = {}
+    if d2 is not None:
+        symbols = {t.stock.symbol: t.stock.yahoo_symbol for t in d2.stocks}
+        closes = await prices.many(s for s in symbols.values() if s)
+        for symbol, yahoo in symbols.items():
+            series = closes.get(yahoo) if yahoo else None
+            stats[symbol] = StockStats.from_closes(series) if series else None
+            if series:
+                days[symbol] = {mode: dip_days(series, cfg) for mode, cfg in d2.modes.items()}
+        missing = sorted(symbol for symbol, value in stats.items() if value is None)
+        if missing:
+            notes.append(f"No usable price history for: {', '.join(missing)}")
+
+    start = since(now, settings.advise_lookback_days)
+    activity = (
+        d2_activity(load_reports(settings.d2_dir / "var" / "runs", "t2-d2", start))
+        if d2 is not None
+        else D2Activity()
+    )
+    if d2 is not None and activity.sessions == 0:
+        notes.append(f"No t2-d2 run reports in the last {settings.advise_lookback_days} days.")
+    k2_decisions = (
+        k2_latest(load_reports(settings.k2_dir / "var" / "runs", "t2-k2", start))
+        if k2 is not None
+        else []
+    )
+    if k2 is not None and not k2_decisions:
+        notes.append(f"No t2-k2 run reports in the last {settings.advise_lookback_days} days.")
+
+    weights = None
+    cash_weight = None
+    if portfolio is not None:
+        weights = {h.t212_ticker: h.weight for h in portfolio.holdings}
+        cash_weight = portfolio.cash_weight
+    else:
+        notes.append("No portfolio: position weights were not considered.")
+
+    store = SuggestionStore(settings.suggestions_dir)
+    return AdviceContext(
+        droids=droids,
+        thesis=thesis,
+        d2=d2,
+        k2=k2,
+        instruments=instruments,
+        stats=stats,
+        dip_days=days,
+        activity=activity,
+        k2_decisions=list(k2_decisions),
+        weights=weights,
+        cash_weight=cash_weight,
+        past=store.past(since(now, settings.rejected_memory_days)),
+        lookback_days=settings.advise_lookback_days,
+        notes=notes,
+    )
+
+
+async def _advise(args: argparse.Namespace, settings: Settings, report: RunReport) -> Exit:
+    now = datetime.now(UTC)
+    model, _market, _limits, portfolio = await _setup(args, settings)
+    prices = PriceHistory()
+    try:
+        ctx = await _advice_context(args, settings, portfolio, prices, now)
+    except (ConfigReadError, ThesisError) as exc:
+        print(f"Advice error: {exc}", file=sys.stderr)
+        return report.finish(Exit.CONFIG, f"advice error: {exc}")
+
+    agents = build_advise_agents(model)
+    context = render_context(ctx)
+    try:
+        drafts = await draft_advice(agents, context)
+        verdicts = await review_advice(agents, reviewer_prompt(context, drafts))
+    except _EVALUATION_ERRORS as exc:
+        logger.error("advice_failed error=%s", exc)
+        return report.finish(Exit.FAILED, "the advice agents failed", errors=[str(exc)])
+
+    # Price history for proposed new holdings, so code can check Yahoo knows them.
+    new_symbols = []
+    for draft in drafts.suggestions:
+        if draft.kind == "add_holding" and ctx.instruments is not None and draft.symbol:
+            checked = check_draft(draft, ctx, now)
+            if not isinstance(checked, str) and checked.yahoo_symbol:
+                new_symbols.append(checked.yahoo_symbol)
+    new_closes = await prices.many(new_symbols)
+    new_stats = {s: StockStats.from_closes(c) if c else None for s, c in new_closes.items()}
+
+    run = finalize(
+        drafts,
+        verdicts,
+        ctx,
+        new_stats,
+        now,
+        settings.max_suggestions,
+        settings.rejected_memory_days,
+    )
+    rendered = render_advice(run, ctx)
+    files: dict[str, str] = {}
+    if args.dry_run:
+        print(rendered)
+    else:
+        store = SuggestionStore(settings.suggestions_dir)
+        files["suggestions_file"] = str(store.write_run(run))
+        files["report_file"] = str(
+            write_new(settings.reports_dir, f"{now:%Y-%m-%d}_advice", ".md", rendered)
+        )
+        print(f"{len(run.suggestions)} suggestions")
+        print(f"  {files['report_file']}\n  {files['suggestions_file']}")
+        for s in run.suggestions:
+            print(f"  {s.id}  {s.confidence:<6}  {s.title}")
+    return report.finish(
+        Exit.OK,
+        f"{len(run.suggestions)} suggestions for {', '.join(ctx.droids)}"
+        f" ({len(run.dropped)} drafts dropped)",
+        {
+            "suggestions": [
+                {
+                    "id": s.id,
+                    "kind": s.kind,
+                    "droid": s.droid,
+                    "target": s.target,
+                    "current": s.current,
+                    "proposed": s.proposed,
+                    "confidence": s.confidence,
+                    "repeat": s.repeat,
+                }
+                for s in run.suggestions
+            ],
+            "dropped": [{"kind": d.draft.kind, "reason": d.reason} for d in run.dropped],
+            "notes": run.notes,
+            **files,
+        },
+    )
+
+
+def _suggestions(args: argparse.Namespace, settings: Settings, report: RunReport) -> Exit:
+    store = SuggestionStore(settings.suggestions_dir)
+    if args.action in ("accept", "reject"):
+        if not args.id:
+            print(f"Give the id of the suggestion to {args.action}.", file=sys.stderr)
+            return report.finish(Exit.CONFIG, f"no id to {args.action}")
+        status: Status = "accepted" if args.action == "accept" else "rejected"
+        try:
+            suggestion = store.decide(args.id, status, args.note or "", datetime.now(UTC))
+        except KeyError:
+            print(f"No suggestion with id {args.id}.", file=sys.stderr)
+            return report.finish(Exit.CONFIG, f"no suggestion {args.id}")
+        print(f"{args.id} {status}: {suggestion.title}")
+        return report.finish(Exit.OK, f"{args.id} {status}", {"id": args.id, "status": status})
+
+    decisions = store.decisions()
+    rows = []
+    for suggestion in sorted(store.suggestions().values(), key=lambda s: s.created_at):
+        decision = decisions.get(suggestion.id)
+        status = decision.status if decision else "open"
+        if status != "open" and not args.all:
+            continue
+        note = f" ({decision.note})" if decision and decision.note else ""
+        rows.append(
+            f"{suggestion.id}  {status:<8}  {suggestion.created_at:%Y-%m-%d}  "
+            f"{suggestion.confidence:<6}  {suggestion.title}{note}"
+        )
+    print("\n".join(rows) if rows else "No open suggestions.")
+    return report.finish(Exit.OK, f"{len(rows)} suggestions listed", {"count": len(rows)})
+
+
 def list_gemini_models(api_key: str) -> list[str]:
     """Flash models the key can call with ``generateContent``, without the ``models/`` prefix."""
     from google import genai
@@ -331,7 +544,36 @@ def _parser() -> argparse.ArgumentParser:
     models = commands.add_parser(
         "models", help="List the Gemini Flash models your GOOGLE_API_KEY can use"
     )
-    for sub in (run, review, export, models):
+
+    advise = commands.add_parser(
+        "advise", help="Suggest changes to t2-d2's and t2-k2's strategy and configuration"
+    )
+    advise.add_argument(
+        "--only", choices=sorted(_DROIDS), help="Advise on one droid only: d2 or k2"
+    )
+    advise.add_argument(
+        "--no-portfolio",
+        action="store_true",
+        help="Skip Trading212; position weights are not considered",
+    )
+    advise.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the advice, with real model calls, but print it and record nothing",
+    )
+
+    suggestions = commands.add_parser(
+        "suggestions", help="List suggestions, or record that you accepted or rejected one"
+    )
+    suggestions.add_argument(
+        "action", nargs="?", default="list", choices=["list", "accept", "reject"]
+    )
+    suggestions.add_argument("id", nargs="?", help="Suggestion id, for accept and reject")
+    suggestions.add_argument("--note", help="Why, recorded with your answer")
+    suggestions.add_argument(
+        "--all", action="store_true", help="List accepted and rejected suggestions too"
+    )
+    for sub in (run, review, export, models, advise, suggestions):
         sub.add_argument(
             "--report",
             type=Path,
@@ -354,6 +596,8 @@ async def _locked(
         with run_lock(DROID):
             if command == "review":
                 return await _review(args, settings, report)
+            if command == "advise":
+                return await _advise(args, settings, report)
             return await _evaluate(args, settings, report)
     except SetupError as exc:
         return report.finish(exc.code, str(exc), errors=[str(exc)])
@@ -383,6 +627,8 @@ def main(argv: list[str] | None = None) -> int:
         code = _export(args, settings, report)
     elif args.command == "models":
         code = _models(settings, report)
+    elif args.command == "suggestions":
+        code = _suggestions(args, settings, report)
     else:
         code = asyncio.run(_locked(args.command, args, settings, report))
     try:

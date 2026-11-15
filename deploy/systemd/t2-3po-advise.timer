@@ -1,0 +1,12 @@
+# Installed by t2-hq's bin/t2-deploy.
+[Unit]
+Description=Weekly T2-3PO strategy advice (Sunday, after the review)
+
+[Timer]
+OnCalendar=Sun 08:00 Europe/London
+# Run at the next start-up if the machine was off or asleep at the scheduled time.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

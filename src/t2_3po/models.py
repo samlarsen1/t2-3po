@@ -160,3 +160,58 @@ class Proposal(BaseModel):
     ticker: str
     thesis_file: str
     approved_at: datetime | None = None
+
+
+# --- Strategy advice: what the Strategy Analyst and Risk Reviewer write ----------------------
+
+Kind = Literal["change_mode", "add_holding", "remove_holding", "change_threshold"]
+Droid = Literal["t2-d2", "t2-k2"]
+Confidence = Literal["LOW", "MEDIUM", "HIGH"]
+Market = Literal["uk", "us", "europe"]
+Status = Literal["open", "accepted", "rejected"]
+
+MAX_DRAFTS = 8
+
+
+class SuggestionDraft(BaseModel):
+    """One proposed change, as drafted by the Strategy Analyst."""
+
+    kind: Kind
+    droid: Droid
+    symbol: str | None = Field(
+        default=None,
+        description="change_mode/remove_holding: the stock's symbol in stocks.yaml. "
+        "add_holding: the new stock's exchange symbol.",
+    )
+    market: Market | None = Field(default=None, description="add_holding only")
+    t212_ticker: str | None = Field(
+        default=None, description="add_holding: the Trading212 code, if known"
+    )
+    key: str | None = Field(
+        default=None, description="change_threshold: one of the adjustable setting keys"
+    )
+    proposed: str = Field(
+        description="change_mode/add_holding: the mode. remove_holding: 'watchlist'. "
+        "change_threshold: the new number."
+    )
+    rationale: str
+    evidence: list[str] = Field(description="Figures quoted from the supplied data")
+    expected_effect: str
+    risk: str
+    confidence: Confidence
+
+
+class AdvisorOutput(BaseModel):
+    suggestions: list[SuggestionDraft] = Field(max_length=MAX_DRAFTS)
+    no_change: str = Field(description="What should stay as it is, and why")
+
+
+class DraftVerdict(BaseModel):
+    index: int = Field(description="The draft's number, starting at 1")
+    keep: bool
+    confidence: Confidence
+    note: str
+
+
+class ReviewerOutput(BaseModel):
+    verdicts: list[DraftVerdict]

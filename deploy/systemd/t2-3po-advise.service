@@ -1,0 +1,13 @@
+# Installed by t2-hq's bin/t2-deploy, which replaces @APP_DIR@ with the deployed app directory.
+[Unit]
+Description=T2-3PO weekly strategy and configuration advice for t2-d2 and t2-k2
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/t2-3po advise
+# Exit code 3 means skipped (a lock is held), which is not a failure.
+SuccessExitStatus=3
+TimeoutStartSec=30min

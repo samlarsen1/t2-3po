@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     macro_thesis_file: Path = Path("theses/macro/core.md")
     stocks_file: Path = Path("../t2-d2/config/stocks.yaml")
 
+    # The other droids, side by side with this one (deployed or in development).
+    d2_dir: Path = Path("../t2-d2")
+    k2_dir: Path = Path("../t2-k2")
+    bb8_dir: Path = Path("../t2-bb8")
+    suggestions_dir: Path = Path("var/suggestions")
+    # Run reports from the last this-many days feed the advice.
+    advise_lookback_days: int = Field(default=30, ge=1, le=365)
+    max_suggestions: int = Field(default=5, ge=1, le=10)
+    # A rejected suggestion isn't made again for this long.
+    rejected_memory_days: int = Field(default=90, ge=1)
+
     theses_dir: Path = Path("theses")
     reports_dir: Path = Path("reports")
     proposals_dir: Path = Path("proposals")
