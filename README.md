@@ -34,6 +34,9 @@ t2-3po is the advisory layer. It reads the other droids' configuration and run r
 
 If an evaluation fails at any stage, no proposal is written for that thesis.
 
+t2-3po also advises on how the trading droids are configured; see
+[Advising on t2-d2 and t2-k2](#advising-on-t2-d2-and-t2-k2).
+
 ## Quick start
 
 Requires [uv](https://github.com/astral-sh/uv).
@@ -141,6 +144,52 @@ Gemini the requests are still spaced out to respect the free tier's limits. Each
 own, so the report says what the target weights add up to. For a full Bull, Bear and Quant debate on
 one stock, write a single-stock thesis and use `evaluate`.
 
+## Advising on t2-d2 and t2-k2
+
+`advise` reviews how the trading droids are configured and suggests changes: move a t2-d2 stock to
+another mode, add a stock to t2-d2, move one to the watchlist, or change one of t2-d2's or t2-k2's
+thresholds. It never edits their files. You apply a suggestion yourself, then record your answer.
+
+```bash
+# Print the advice without recording anything
+uv run t2-3po advise --dry-run
+
+# Record the advice: var/suggestions/YYYY-MM-DD_advice.json and reports/YYYY-MM-DD_advice.md
+uv run t2-3po advise
+uv run t2-3po advise --only k2           # one droid only: d2 or k2
+
+# Open suggestions, and your answers
+uv run t2-3po suggestions
+uv run t2-3po suggestions accept e3a79f4f --note "applied in PR #31"
+uv run t2-3po suggestions reject 1b2c3d4e --note "TSLA stays on moderate"
+uv run t2-3po suggestions --all
+```
+
+How it works:
+
+1. **Code gathers the figures.** It reads t2-d2's `config/stocks.yaml` and `config/strategy.yaml`
+   and t2-k2's `config/strategy.yaml`, from the sibling directories (`D2_DIR`, `K2_DIR`). For each
+   t2-d2 stock it fetches a year of prices and computes the return, volatility, distance from the
+   1-year high, the 200-day trend, and **dip days by mode**: how often each mode's price rule
+   would have fired in the last year. It tallies what t2-d2 actually did over the last 30 days of
+   its run reports (evaluations, buy signals, buys, top skip reasons) and reads t2-k2's last run.
+   With a portfolio, it adds position weights, never account values.
+2. **Two model calls.** The Strategy Analyst drafts up to eight suggestions from those figures; the
+   Risk Reviewer then challenges each one and sets its confidence.
+3. **Code checks every draft** and drops what fails, saying why in the report:
+   - a mode must exist, and a stock must be in `stocks.yaml`;
+   - a new holding must match exactly one tradable instrument in t2-bb8's instrument list
+     (`BB8_DIR`) in the stated market, not already be listed, and have a year of Yahoo prices;
+   - a threshold must be one of the adjustable keys, keep its sign and change by at most 50% at a
+     time (`overbought.min_signals` must be 1 to 3, `harvest.gain_fraction` above 0 and at most 1);
+   - a suggestion you rejected in the last 90 days, or already accepted, isn't made again. One
+     that is still open is marked as a repeat.
+
+   At most five survive (`MAX_SUGGESTIONS`), highest confidence first.
+
+Each suggestion has a stable id: the same change suggested again keeps the same id. Answers are kept
+in `var/suggestions/decisions.json`.
+
 ## Output
 
 | File | Contents |
@@ -234,6 +283,11 @@ A thesis is a markdown file with YAML front matter. See
 | `GOOGLE_API_KEY` | | Required with `MODEL_PROVIDER=google` for `evaluate` and `review`, including with `--dry-run` |
 | `MACRO_THESIS_FILE` | `theses/macro/core.md` | The macro thesis for `review` |
 | `STOCKS_FILE` | `../t2-d2/config/stocks.yaml` | The stocks for `review` |
+| `D2_DIR`, `K2_DIR`, `BB8_DIR` | `../t2-d2`, `../t2-k2`, `../t2-bb8` | The other droids, for `advise`: their `config/`, `var/runs/` and t2-bb8's instrument list |
+| `SUGGESTIONS_DIR` | `var/suggestions` | Advice runs and your answers |
+| `ADVISE_LOOKBACK_DAYS` | `30` | Days of run reports the advice considers |
+| `MAX_SUGGESTIONS` | `5` | Most suggestions kept per run |
+| `REJECTED_MEMORY_DAYS` | `90` | How long a rejected suggestion isn't repeated |
 | `GEMINI_MODEL` | `gemini-3.7-flash` | Gemini model for every agent, including document digests |
 | `GEMINI_MIN_INTERVAL_SECONDS` | `7` | Minimum gap between the starts of two Gemini requests |
 | `OLLAMA_MODEL` | `qwen3:4b` | Local model, with `MODEL_PROVIDER=ollama` |
@@ -262,7 +316,8 @@ bin/t2-deploy status
 ```
 
 The units run `t2-3po review` every Sunday at 07:00 UK time (`t2-3po.timer`), an hour after
-T2-BB8's harvest. A run missed while the machine was off or asleep runs at the next start-up. It
+T2-BB8's harvest, and `t2-3po advise` at 08:00 (`t2-3po-advise.timer`). Read the advice in
+`$T2_APPS/t2-3po/reports/` and answer it with `t2-3po suggestions`, run from that directory. A run missed while the machine was off or asleep runs at the next start-up. It
 reads the stocks from the deployed T2-D2 (`../t2-d2/config/stocks.yaml`), so deploy that first,
 and its `.env` needs `GOOGLE_API_KEY` (or `MODEL_PROVIDER=ollama`).
 

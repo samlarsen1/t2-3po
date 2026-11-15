@@ -19,10 +19,12 @@ from pydantic_ai.settings import ModelSettings
 
 from .config import Settings
 from .models import (
+    AdvisorOutput,
     AnalystView,
     CouncilResult,
     OrchestratorDecision,
     QuantView,
+    ReviewerOutput,
     ReviewOverview,
     VehicleProfile,
 )
@@ -159,6 +161,56 @@ than recommending particular stocks.
 
 Base this on the profiles. Don't re-judge a stock on figures you weren't given."""
 
+_ADVICE_RULES = """\
+The investor runs two trading droids on their Trading212 ISA. Both trade by fixed rules in YAML; \
+you can only suggest changes to those rules, which the investor then applies by hand.
+
+- t2-d2 buys dips. Each stock in its stocks.yaml has a mode (deep_value, mild, moderate or \
+aggressive) whose thresholds decide how big a fall triggers a buy and how much it buys. A \
+gentler mode buys rarely and little; a more aggressive mode buys more often and more.
+- t2-k2 trims overbought winners. Its settings decide what counts as overbought and how much of \
+the gain to sell.
+
+The figures come from code: "dip days by mode" counts the days in the last year when each \
+mode's price rule would have fired (real buys are rarer, because RSI, trend and cash checks also \
+apply), and the activity lines say what t2-d2 actually did. Use only these figures.
+
+Allowed changes, and nothing else:
+- change_mode: move a t2-d2 stock to another existing mode.
+- add_holding: add a stock to t2-d2, with its exchange symbol, market (uk, us or europe) and \
+mode. Only for a clear gap in the macro thesis; it is checked against Trading212's instrument \
+list, so give the symbol it trades under.
+- remove_holding: move a t2-d2 stock to the watchlist, so it is no longer bought.
+- change_threshold: change one of the listed adjustable keys of t2-d2 or t2-k2.
+
+Prefer few, well-supported changes to many small ones. Don't repeat a suggestion listed as \
+rejected in past_suggestions. Never suggest a change that concentrates the portfolio further in \
+an already large holding."""
+
+ADVISOR_PROMPT = f"""{_SHARED}
+
+You are the Strategy Analyst. Review how the trading droids are configured against the macro \
+thesis and the figures, and draft up to eight suggested changes.
+
+{_ADVICE_RULES}
+
+For each suggestion, quote the figures that support it in evidence, say what should change in \
+the droid's behaviour, and name the main risk. Set confidence by how directly the figures \
+support it. In no_change, say what should stay as it is and why, including when you suggest \
+nothing at all."""
+
+REVIEWER_PROMPT = f"""{_SHARED}
+
+You are the Risk Reviewer. The Strategy Analyst has drafted suggestions for the trading droids' \
+configuration. Challenge each one.
+
+{_ADVICE_RULES}
+
+For every draft, by its index, decide whether to keep it. Keep a draft only if the supplied \
+figures support it and its benefit outweighs its risk: more trading, larger positions, \
+concentration, or chasing a recent move. Set its confidence, and in note give the strongest \
+objection, or why it holds up."""
+
 DIGEST_PROMPT = """\
 You extract investment evidence from long documents such as earnings transcripts and 10-Ks. \
 Summarise what bears on the thesis: guidance, segment figures, margins, debt, risk factors, and \
@@ -194,6 +246,32 @@ def build_review_agents(model: Model) -> ReviewAgents:
         vehicle=_agent(model, "vehicle", VehicleProfile, VEHICLE_PROMPT),
         overview=_agent(model, "overview", ReviewOverview, OVERVIEW_PROMPT),
     )
+
+
+@dataclass(frozen=True)
+class AdviseAgents:
+    """Strategy advice: the Strategy Analyst drafts, the Risk Reviewer challenges."""
+
+    advisor: Agent[None, AdvisorOutput]
+    reviewer: Agent[None, ReviewerOutput]
+
+
+def build_advise_agents(model: Model) -> AdviseAgents:
+    """Build the strategy advice agents."""
+    return AdviseAgents(
+        advisor=_agent(model, "advisor", AdvisorOutput, ADVISOR_PROMPT),
+        reviewer=_agent(model, "reviewer", ReviewerOutput, REVIEWER_PROMPT),
+    )
+
+
+async def draft_advice(agents: AdviseAgents, context: str) -> AdvisorOutput:
+    """The Strategy Analyst's draft suggestions."""
+    return await _run(agents.advisor, context)
+
+
+async def review_advice(agents: AdviseAgents, prompt: str) -> ReviewerOutput:
+    """The Risk Reviewer's verdict on each draft."""
+    return await _run(agents.reviewer, prompt)
 
 
 @dataclass(frozen=True)

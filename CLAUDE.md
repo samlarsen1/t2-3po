@@ -19,6 +19,10 @@ shared droid contract (run reports, exit codes, locks) are agreed in `t2-hq` fir
 
 - **Read-only.** Never add a Trading212 call other than GET, and never edit another droid's files.
   Suggestions are written as reports and proposals for the operator to act on.
+- **Advice is checked by code.** `advise` drafts with the model, but every suggestion is validated
+  in `advise.py` (`check_draft`, `threshold_problem`) against the droids' configuration and t2-bb8's
+  instrument list before it is shown. Figures the model sees come from code (`prices.py`,
+  `runlog.py`), never from the model. Only allow-listed settings are adjustable (`configs.py`).
 - **Free models only.** The council runs on Gemini's free tier or a local Ollama model
   (`MODEL_PROVIDER=google|ollama`). Don't add a paid provider. Keep Gemini requests paced and
   retried (`pacing.py`, `GEMINI_RETRY` in `agents.py`) so a run stays inside the free tier's limits.
