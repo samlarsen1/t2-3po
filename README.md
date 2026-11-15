@@ -65,7 +65,13 @@ Both options are free. `MODEL_PROVIDER` picks one.
 
 **Gemini on Google's free tier** (`MODEL_PROVIDER=google`, the default). Get a key from
 [Google AI Studio](https://aistudio.google.com/apikey) and set `GOOGLE_API_KEY`. `GEMINI_MODEL`
-defaults to `gemini-flash-latest`, Google's alias for its current Flash model.
+defaults to `gemini-3.7-flash`. Google retires model names, and the `-latest` aliases aren't
+offered to every key, so if a run fails with a 404 for the model, list the Flash models your key
+can use and set `GEMINI_MODEL` to one of them:
+
+```bash
+uv run t2-3po models
+```
 
 - **Rate limits.** The free tier allows only a few requests a minute and a daily quota. t2-3po starts
   requests at least `GEMINI_MIN_INTERVAL_SECONDS` apart (7s by default, so under 10 a minute), even
@@ -228,7 +234,7 @@ A thesis is a markdown file with YAML front matter. See
 | `GOOGLE_API_KEY` | | Required with `MODEL_PROVIDER=google` for `evaluate` and `review`, including with `--dry-run` |
 | `MACRO_THESIS_FILE` | `theses/macro/core.md` | The macro thesis for `review` |
 | `STOCKS_FILE` | `../t2-d2/config/stocks.yaml` | The stocks for `review` |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model for every agent, including document digests |
+| `GEMINI_MODEL` | `gemini-3.7-flash` | Gemini model for every agent, including document digests |
 | `GEMINI_MIN_INTERVAL_SECONDS` | `7` | Minimum gap between the starts of two Gemini requests |
 | `OLLAMA_MODEL` | `qwen3:4b` | Local model, with `MODEL_PROVIDER=ollama` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama server |

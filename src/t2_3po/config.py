@@ -24,8 +24,9 @@ class Settings(BaseSettings):
     model_provider: ModelProvider = "google"
 
     google_api_key: SecretStr | None = None
-    # An alias for Google's current Flash model, which the free tier covers.
-    gemini_model: str = "gemini-flash-latest"
+    # A Flash model on the free tier. Google retires model names, so check them with
+    # `t2-3po models` and override with GEMINI_MODEL.
+    gemini_model: str = "gemini-3.7-flash"
     # The free tier allows only a few requests a minute, so requests are spaced at least this far
     # apart. 7s keeps a run under 10 requests a minute.
     gemini_min_interval_seconds: float = Field(default=7.0, ge=0)

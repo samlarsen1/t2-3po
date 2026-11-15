@@ -257,6 +257,38 @@ def _export(args: argparse.Namespace, settings: Settings, report: RunReport) -> 
     return report.finish(Exit.OK, f"exported {args.proposal}", {"export": str(exported)})
 
 
+def list_gemini_models(api_key: str) -> list[str]:
+    """Flash models the key can call with ``generateContent``, without the ``models/`` prefix."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    names = [
+        model.name.removeprefix("models/")
+        for model in client.models.list()
+        if model.name
+        and "flash" in model.name
+        and "generateContent" in (model.supported_actions or [])
+    ]
+    return sorted(names)
+
+
+def _models(settings: Settings, report: RunReport) -> Exit:
+    if settings.google_api_key is None:
+        print("Configuration error: GOOGLE_API_KEY is not set", file=sys.stderr)
+        return report.finish(Exit.CONFIG, "GOOGLE_API_KEY is not set")
+    try:
+        names = list_gemini_models(settings.google_api_key.get_secret_value())
+    except Exception as exc:  # the SDK raises several unrelated error types
+        print(f"Could not list models: {type(exc).__name__}", file=sys.stderr)
+        return report.finish(Exit.FAILED, "could not list models", errors=[type(exc).__name__])
+    for name in names:
+        marker = "  (GEMINI_MODEL)" if name == settings.gemini_model else ""
+        print(f"{name}{marker}")
+    if settings.gemini_model not in names:
+        print(f"GEMINI_MODEL={settings.gemini_model} is not in this list.", file=sys.stderr)
+    return report.finish(Exit.OK, f"{len(names)} Flash models available", {"models": names})
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="t2-3po", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -296,7 +328,10 @@ def _parser() -> argparse.ArgumentParser:
     export = commands.add_parser("export", help="Export a human-approved proposal for t2-d2")
     export.add_argument("proposal", help="Path to a proposal JSON file")
     export.add_argument("--approve", action="store_true", help="Confirm you reviewed the proposal")
-    for sub in (run, review, export):
+    models = commands.add_parser(
+        "models", help="List the Gemini Flash models your GOOGLE_API_KEY can use"
+    )
+    for sub in (run, review, export, models):
         sub.add_argument(
             "--report",
             type=Path,
@@ -346,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "export":
         code = _export(args, settings, report)
+    elif args.command == "models":
+        code = _models(settings, report)
     else:
         code = asyncio.run(_locked(args.command, args, settings, report))
     try:
