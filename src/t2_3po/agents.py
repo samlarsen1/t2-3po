@@ -6,7 +6,6 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TypeVar
 
 from google.genai.types import HttpRetryOptions
 from pydantic_ai import Agent, NativeOutput
@@ -31,7 +30,6 @@ from .pacing import PacedModel
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
 
 _SHARED = """\
 You advise a private investor on a UK Stocks & Shares ISA held at Trading212. A human reviews your \
@@ -212,7 +210,7 @@ def _settings(model: Model) -> ModelSettings:
     return _GEMINI_SETTINGS if isinstance(inner, GoogleModel) else _LOCAL_SETTINGS
 
 
-def _agent(model: Model, name: str, output: type[T], prompt: str) -> Agent[None, T]:
+def _agent[T](model: Model, name: str, output: type[T], prompt: str) -> Agent[None, T]:
     settings = _settings(model)
     return Agent(
         model,
@@ -267,7 +265,7 @@ def build_model(settings: Settings) -> Model:
     return PacedModel(gemini, settings.gemini_min_interval_seconds)
 
 
-async def _run(agent: Agent[None, T], prompt: str | Sequence[UserContent]) -> T:
+async def _run[T](agent: Agent[None, T], prompt: str | Sequence[UserContent]) -> T:
     result = await agent.run(prompt)
     usage = result.usage
     logger.info(

@@ -45,7 +45,7 @@ cp .env.example .env    # then fill in your keys
 # Write a thesis
 cp theses/NVDA.example.md theses/NVDA.md
 
-# Run the full evaluation and print the report, without writing any files.
+# Run the full evaluation and print the report, without writing reports or proposals.
 # This makes the same model calls as a normal run.
 uv run t2-3po evaluate theses/NVDA.md --dry-run
 
@@ -171,6 +171,27 @@ thesis in `theses/macro/` is tracked, so keep positions and amounts out of it.
 `thesis_status` is `VALIDATED`, `VALIDATED_WITH_RISKS`, `NEEDS_REVISION` or `REJECTED`. `action` is
 `BUY`, `HOLD`, `TRIM` or `SELL`.
 
+## Run reports, exit codes and locks
+
+t2-3po follows the T2 droid contract (t2-hq `CONTRACT.md`):
+
+- **Run report.** Every run writes a JSON report to `var/runs/<UTC timestamp>-<command>.json`
+  (or `$T2_RUNS_DIR`). It records the version, command, start and end time, dry-run flag, status,
+  exit code, a one-line summary and errors. Its `result` lists each thesis or stock with its verdict and the files written. `evaluate` and `review` fail with `1` if any thesis or stock fails, or the portfolio can't be fetched; a missing key or thesis is `2`. `export` writes a report too, and `--dry-run` still writes the run report. `--report PATH` writes it somewhere else.
+- **Exit codes:** `0` success, `1` the run failed, `2` configuration or usage error, `3` skipped
+  (another evaluation or review is running, or the Trading212 lock is held).
+- **One run at a time.** A second run while one is in progress exits `3` at once.
+- **The Trading212 account is shared.** Before fetching the portfolio a run waits for the account lock,
+  which every droid takes, so droids on independent timers don't trip the per-account rate limits.
+  If it is still held after 10 minutes (`T2_T212_LOCK_TIMEOUT`, in seconds), the run exits `3`.
+
+Locks live in `/run/user/<uid>/t2` (or `$T2_LOCK_DIR`).
+
+```bash
+uv run t2-3po review --only RIO --dry-run
+ls var/runs/
+```
+
 ## Handing over to t2-d2
 
 After reviewing a report, export its proposal:
@@ -214,9 +235,33 @@ A thesis is a markdown file with YAML front matter. See
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
 | `MAX_POSITION_WEIGHT` | `0.175` | Position limit. The default is t2-d2's highest per-mode cap |
 | `THESES_DIR`, `REPORTS_DIR`, `PROPOSALS_DIR`, `EXPORT_DIR` | `theses`, `reports`, `proposals`, `exports` | Directories |
+| `T2_RUNS_DIR` | `var/runs` | Where run reports go |
+| `T2_LOCK_DIR` | `/run/user/<uid>/t2` | Where the run and Trading212 locks live |
+| `T2_T212_LOCK_TIMEOUT` | `600` | Seconds to wait for the shared Trading212 lock before skipping |
 | `LOG_LEVEL` | `INFO` | Log level |
 
 Yahoo Finance data comes from `yfinance`, which needs no key.
+
+## Deployment
+
+t2-3po is deployed with t2-hq's `bin/t2-deploy`, which checks out a release tag in
+`$T2_APPS/t2-3po`, builds its virtual environment and installs the systemd user units in
+`deploy/systemd/`:
+
+```bash
+# From the t2-hq checkout
+bin/t2-deploy release t2-3po v0.2.0   # tag a clean, tested main and push the tag
+bin/t2-deploy deploy t2-3po           # deploy the newest tag
+bin/t2-deploy status
+```
+
+The units run `t2-3po review` every Sunday at 07:00 UK time (`t2-3po.timer`), an hour after
+T2-BB8's harvest. A run missed while the machine was off or asleep runs at the next start-up. It
+reads the stocks from the deployed T2-D2 (`../t2-d2/config/stocks.yaml`), so deploy that first,
+and its `.env` needs `GOOGLE_API_KEY` (or `MODEL_PROVIDER=ollama`).
+
+The deploy never creates, reads or edits `.env`: write `$T2_APPS/t2-3po/.env` from `.env.example`
+first, or the deploy stops before enabling anything.
 
 ## Development
 
