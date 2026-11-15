@@ -57,7 +57,7 @@ While `t2-d2` handles deterministic execution, portfolio state polling, and orde
 
 ## 4. Tech Stack & Integration
 
-* **Repository:** `samlarsen1/t2-3po`
+* **Repository:** `<owner>/t2-3po`
 * **Language/Framework:** Python 3.11+ using `PydanticAI` / `LangGraph`
 * **LLM Engine:**
   * Anthropic Claude 3.5/3.7 Sonnet (Primary reasoning, thesis synthesis, advice)

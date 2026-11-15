@@ -2,9 +2,9 @@
 
 ## System context
 
-Part of the T2 droid system. The hub repo is `../t2-hq` (https://github.com/samlarsen1/t2-hq):
+Part of the T2 droid system. The hub repo is `../t2-hq`:
 read its `ARCHITECTURE.md` and `PLAN.md` before changing how this repo interacts with the others.
-Repos sit side by side under `~/dev/git/samlarsen1/t2/` (development) and `~/dev/apps/` (deployed).
+Repos sit side by side in one development directory (`$T2_SRC`) and one apps directory (`$T2_APPS`).
 
 - `../t2-d2`: buys dips; places buy orders on its own timers
 - `../t2-k2`: harvests gains from overbought holdings; places sell orders
@@ -18,7 +18,7 @@ shared droid contract (run reports, exit codes, locks) are agreed in `t2-hq` fir
 ## Rules
 
 - **Read-only.** Never add a Trading212 call other than GET, and never edit another droid's files.
-  Suggestions are written as reports and proposals for Sam to act on.
+  Suggestions are written as reports and proposals for the operator to act on.
 - **Free models only.** The council runs on Gemini's free tier or a local Ollama model
   (`MODEL_PROVIDER=google|ollama`). Don't add a paid provider. Keep Gemini requests paced and
   retried (`pacing.py`, `GEMINI_RETRY` in `agents.py`) so a run stays inside the free tier's limits.
