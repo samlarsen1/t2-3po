@@ -93,7 +93,7 @@ async def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
     if setup is None:
         return 1
     model, market, limits, portfolio = setup
-    council = build_council(model, settings.digest_cache_ttl)
+    council = build_council(model)
 
     failures = 0
     for path in paths:
@@ -133,7 +133,7 @@ async def _review(args: argparse.Namespace, settings: Settings) -> int:
     model, market, limits, portfolio = setup
     agents = build_review_agents(model)
     print(
-        f"Reviewing {len(stocks)} stocks against {thesis_path}: one Claude call each, "
+        f"Reviewing {len(stocks)} stocks against {thesis_path}: one model call each, "
         "then one across all of them."
     )
 
@@ -192,7 +192,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run the full evaluation, with paid model calls, but print the report, not files",
+        help="Run the full evaluation, with real model calls, but print the report, not files",
     )
 
     review = commands.add_parser(
@@ -211,7 +211,7 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run every review, with paid model calls, but print the reports, not files",
+        help="Run every review, with real model calls, but print the reports, not files",
     )
 
     export = commands.add_parser("export", help="Export a human-approved proposal for t2-d2")
