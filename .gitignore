@@ -228,3 +228,4 @@ exports/
 theses/*
 !theses/*.example.md
 !theses/macro/
+.headroom/
