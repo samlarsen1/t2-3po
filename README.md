@@ -19,7 +19,7 @@ GitHub owner as this one.
 | `t2-k2` | harvests gains from overbought holdings; places sell orders |
 | `t2-bb8` | harvests the Trading212 instrument list; metadata only |
 | **t2-3po** (this repo) | advisory council; reviews theses, strategy and configuration; read-only |
-| `t2-hq` | hub: plan, architecture, and the orchestrator and Telegram interface (planned) |
+| `t2-hq` | hub: plan, architecture, and the orchestrator and Telegram interface |
 
 t2-3po is the advisory layer. It reads the other droids' configuration and run reports and suggests changes, such as moving a stock in t2-d2 from `mild` to `moderate` or adding a holding. It never edits their files and never places orders. It runs on its own and doesn't need the other repos to be running.
 

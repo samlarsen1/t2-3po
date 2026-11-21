@@ -9,7 +9,7 @@ Repos sit side by side in one development directory (`$T2_SRC`) and one apps dir
 - `../t2-d2`: buys dips; places buy orders on its own timers
 - `../t2-k2`: harvests gains from overbought holdings; places sell orders
 - `../t2-bb8`: harvests the Trading212 instrument list; metadata only
-- `../t2-hq`: hub; plan, architecture, orchestrator and Telegram interface (planned)
+- `../t2-hq`: hub; plan, architecture, orchestrator and Telegram interface
 
 t2-3po is the advisory layer. It reads the other droids' configuration and run reports and suggests changes, such as moving a stock in t2-d2 from `mild` to `moderate` or adding a holding. It never edits their files and never places orders.
 This repo must keep working standalone: never import a sibling repo's code. Changes to the
