@@ -1,6 +1,6 @@
 [project]
 name = "t2-3po"
-version = "0.3.0"
+version = "0.4.0"
 description = "Strategic and protocol advisory droid for t2-d2: multi-agent investment thesis review"
 readme = "README.md"
 requires-python = ">=3.12"
