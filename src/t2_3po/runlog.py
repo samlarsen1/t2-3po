@@ -92,3 +92,23 @@ def k2_latest(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
             decisions = (report.get("result") or {}).get("decisions")
             return list(decisions) if isinstance(decisions, list) else []
     return []
+
+
+def last_reviewed(reports: list[dict[str, Any]]) -> dict[str, datetime]:
+    """When each stock was last profiled by a real ``review``, keyed by symbol.
+
+    Dry runs are skipped. A stock that failed isn't listed in ``result.stocks``, so it stays due.
+    """
+    latest: dict[str, datetime] = {}
+    for report in reports:
+        if report.get("command") != "review" or report.get("dry_run"):
+            continue
+        try:
+            started = datetime.fromisoformat(report["started_at"])
+            symbols = [str(entry["symbol"]) for entry in report["result"]["stocks"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        for symbol in symbols:
+            if symbol not in latest or started > latest[symbol]:
+                latest[symbol] = started
+    return latest

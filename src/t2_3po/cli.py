@@ -58,9 +58,9 @@ from .review import (
     stock_thesis,
     write_review,
 )
-from .runlog import D2Activity, d2_activity, k2_latest, load_reports
-from .stocks import Stock, StocksError, load_stocks, select_stocks
-from .t2contract import Exit, RunReport, Skipped, run_lock, t212_lock
+from .runlog import D2Activity, d2_activity, k2_latest, last_reviewed, load_reports
+from .stocks import Stock, StocksError, due_stocks, load_stocks, select_stocks
+from .t2contract import Exit, RunReport, Skipped, run_lock, runs_dir, t212_lock
 from .t212 import ReadOnlyTrading212Client, Trading212Error
 from .thesis import ThesisError, discover_theses, parse_thesis, read_document
 
@@ -201,6 +201,10 @@ async def _review(args: argparse.Namespace, settings: Settings, report: RunRepor
     except (ThesisError, StocksError) as exc:
         print(f"Review error: {exc}", file=sys.stderr)
         return report.finish(Exit.CONFIG, f"review error: {exc}")
+    if args.batch is not None:
+        # Spread the stocks over several days to stay inside a free tier's daily request quota.
+        history = load_reports(runs_dir(), DROID, datetime.min.replace(tzinfo=UTC))
+        stocks = due_stocks(stocks, last_reviewed(history), args.batch)
 
     model, market, limits, portfolio = await _setup(args, settings)
     agents = build_review_agents(model)
@@ -502,6 +506,13 @@ def _models(settings: Settings, report: RunReport) -> Exit:
     return report.finish(Exit.OK, f"{len(names)} Flash models available", {"models": names})
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="t2-3po", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -526,6 +537,12 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--stocks", help="t2-d2 stocks file (default: STOCKS_FILE)")
     review.add_argument(
         "--only", nargs="+", default=[], metavar="SYMBOL", help="Review only these stocks"
+    )
+    review.add_argument(
+        "--batch",
+        type=_positive_int,
+        metavar="N",
+        help="Review only the N stocks reviewed least recently, by earlier run reports",
     )
     review.add_argument(
         "--no-portfolio",

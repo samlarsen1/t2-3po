@@ -1,6 +1,8 @@
 """The macro review: every stock in t2-d2's stocks file profiled as a vehicle for one thesis."""
 
 import json
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,8 @@ from t2_3po import cli
 from t2_3po.agents import VEHICLE_PROMPT
 from t2_3po.market import MarketData
 from t2_3po.models import Proposal
-from t2_3po.stocks import Stock, StocksError, load_stocks, select_stocks
+from t2_3po.runlog import last_reviewed
+from t2_3po.stocks import Stock, StocksError, due_stocks, load_stocks, select_stocks
 
 STOCKS_YAML = """
 markets:
@@ -266,6 +269,74 @@ def test_only_limits_the_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
 
     assert fetched == ["HOOD"]
+
+
+def test_due_stocks_takes_the_never_reviewed_then_the_oldest_in_file_order() -> None:
+    stocks = [_stock(s, f"{s}_US_EQ") for s in ["A", "B", "C", "D", "E"]]
+    last = {
+        "a": datetime(2026, 11, 20, tzinfo=UTC),
+        "B": datetime(2026, 11, 18, tzinfo=UTC),
+        "D": datetime(2026, 11, 18, tzinfo=UTC),
+        "GONE": datetime(2026, 11, 1, tzinfo=UTC),
+    }
+
+    assert [s.symbol for s in due_stocks(stocks, last, 2)] == ["C", "E"]
+    # File order is kept in the batch; B and D tie, so B, the earlier in the file, is due first.
+    assert [s.symbol for s in due_stocks(stocks, last, 3)] == ["B", "C", "E"]
+    assert len(due_stocks(stocks, last, 10)) == 5
+
+
+def test_last_reviewed_skips_dry_runs_other_commands_and_unreadable_reports() -> None:
+    def report(command: str, started: str, symbols: list[str], dry_run: bool = False) -> Any:
+        return {
+            "command": command,
+            "started_at": started,
+            "dry_run": dry_run,
+            "result": {"stocks": [{"symbol": s} for s in symbols]},
+        }
+
+    reports = [
+        report("review", "2026-11-20T07:00:00+00:00", ["NG.", "HOOD"]),
+        report("review", "2026-11-21T07:00:00+00:00", ["HOOD"]),
+        report("review", "2026-11-22T07:00:00+00:00", ["RKLB"], dry_run=True),
+        report("evaluate", "2026-11-22T07:00:00+00:00", ["RKLB"]),
+        {"command": "review", "started_at": "2026-11-22T07:00:00+00:00", "result": {}},
+    ]
+
+    assert last_reviewed(reports) == {
+        "NG.": datetime(2026, 11, 20, 7, tzinfo=UTC),
+        "HOOD": datetime(2026, 11, 21, 7, tzinfo=UTC),
+    }
+
+
+def test_batch_reviews_the_stocks_due_and_records_them_for_the_next_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = Path(os.environ["T2_RUNS_DIR"])
+    runs.mkdir(parents=True, exist_ok=True)
+    earlier = {
+        "schema": "t2.run-report/1",
+        "droid": "t2-3po",
+        "command": "review",
+        "started_at": "2026-11-20T07:00:00+00:00",
+        "dry_run": None,
+        "result": {"stocks": [{"symbol": "RKLB"}]},
+    }
+    (runs / "20261120T070000Z-review.json").write_text(json.dumps(earlier))
+    fetched: list[str] = []
+
+    assert _run(tmp_path, monkeypatch, Recorder(), "--batch", "2", fetched=fetched) == 0
+
+    # RKLB was reviewed two days ago; the other two never have been.
+    assert sorted(fetched) == ["HOOD", "NG.L"]
+    [latest] = [p for p in runs.glob("*-review.json") if not p.name.startswith("20261120")]
+    reviewed = [entry["symbol"] for entry in json.loads(latest.read_text())["result"]["stocks"]]
+    assert sorted(reviewed) == ["HOOD", "NG."]
+
+
+def test_batch_must_be_positive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(SystemExit):
+        _run(tmp_path, monkeypatch, Recorder(), "--batch", "0")
 
 
 def test_one_failed_stock_keeps_the_others_and_is_reported(

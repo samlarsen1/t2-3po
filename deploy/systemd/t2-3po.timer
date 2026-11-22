@@ -1,9 +1,11 @@
 # Installed by t2-hq's bin/t2-deploy.
 [Unit]
-Description=Weekly T2-3PO review (Sunday, after the T2-BB8 harvest)
+Description=Daily T2-3PO review of the five stocks reviewed least recently
 
 [Timer]
-OnCalendar=Sun 07:00 Europe/London
+# Daily, so each run stays inside Gemini's free-tier daily quota. On Sundays it runs after
+# the T2-BB8 harvest and before the advice.
+OnCalendar=*-*-* 07:00 Europe/London
 # Run at the next start-up if the machine was off or asleep at the scheduled time.
 Persistent=true
 RandomizedDelaySec=10min

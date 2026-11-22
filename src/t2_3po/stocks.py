@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -74,3 +75,21 @@ def select_stocks(stocks: list[Stock], only: Iterable[str]) -> list[Stock]:
     if unknown:
         raise StocksError(f"Not in the stocks file: {', '.join(sorted(unknown))}")
     return [stock for stock in stocks if _key(stock.symbol) in wanted]
+
+
+def due_stocks(stocks: list[Stock], last: Mapping[str, datetime], count: int) -> list[Stock]:
+    """The ``count`` stocks reviewed least recently: never-reviewed first, then the oldest.
+
+    Ties keep file order, so a daily batch walks through the stocks file and wraps round. A
+    failed review isn't recorded, so that stock is picked again the next day.
+    """
+    seen = {_key(symbol): when for symbol, when in last.items()}
+    order = {id(stock): index for index, stock in enumerate(stocks)}
+
+    def staleness(stock: Stock) -> tuple[bool, datetime, int]:
+        when = seen.get(_key(stock.symbol))
+        return (when is not None, when or datetime.min, order[id(stock)])
+
+    ranked = sorted(stocks, key=staleness)
+    picked = {id(stock) for stock in ranked[:count]}
+    return [stock for stock in stocks if id(stock) in picked]

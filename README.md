@@ -81,7 +81,8 @@ uv run t2-3po models
   when agents run in parallel, and retries a rate-limited or failed request up to four more times,
   waiting 15s, then longer, up to 2 minutes. A `review` of 18 stocks takes about two and a half
   minutes. If you still see 429 errors, raise the interval; if the daily quota runs out, the run fails
-  and can be repeated the next day.
+  and can be repeated the next day. The free daily quota can be as low as 20 requests per model, and a
+  `review` makes one per stock plus one for the overview, so use `--batch` for more than a few stocks.
 - **Privacy.** Google may use free-tier prompts and responses to improve its products. Prompts
   contain your thesis, the stocks and your portfolio weights; with a portfolio they also contain
   position values. Use `--no-portfolio` or Ollama to keep those private.
@@ -116,7 +117,16 @@ uv run t2-3po review --only RIO HOOD --dry-run
 
 # Review every stock, then write the report and a proposal per stock
 uv run t2-3po review
+
+# Review only the 5 stocks reviewed least recently (what the daily timer runs)
+uv run t2-3po review --batch 5
 ```
+
+`--batch N` spreads the stocks over several days, so each run stays inside Gemini's free-tier daily
+quota. It reads this droid's earlier run reports to find when each stock was last reviewed, then
+takes stocks never reviewed first and the oldest after that, in file order on a tie. A stock whose
+review failed isn't recorded as reviewed, so it's picked again the next day. Dry runs don't count.
+The overview then covers that day's batch.
 
 The thesis is plain markdown with no front matter, by default at `theses/macro/core.md`. Name its
 pillars, what would count as serving each one, and what would change your mind.
@@ -315,8 +325,9 @@ bin/t2-deploy deploy t2-3po           # deploy the newest tag
 bin/t2-deploy status
 ```
 
-The units run `t2-3po review` every Sunday at 07:00 UK time (`t2-3po.timer`), an hour after
-T2-BB8's harvest, and `t2-3po advise` at 08:00 (`t2-3po-advise.timer`). Read the advice in
+The units run `t2-3po review --batch 5` every day at 07:00 UK time (`t2-3po.timer`), so about 25
+stocks are each reviewed once a week, and `t2-3po advise` on Sundays at 08:00
+(`t2-3po-advise.timer`), an hour after the review and two after T2-BB8's harvest. Read the advice in
 `$T2_APPS/t2-3po/reports/` and answer it with `t2-3po suggestions`, run from that directory. A run missed while the machine was off or asleep runs at the next start-up. It
 reads the stocks from the deployed T2-D2 (`../t2-d2/config/stocks.yaml`), so deploy that first,
 and its `.env` needs `GOOGLE_API_KEY` (or `MODEL_PROVIDER=ollama`).
