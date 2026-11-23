@@ -1,6 +1,6 @@
 # Installed by t2-hq's bin/t2-deploy.
 [Unit]
-Description=Daily T2-3PO review of the five stocks reviewed least recently
+Description=Daily T2-3PO review of the two stocks reviewed least recently
 
 [Timer]
 # Daily, so each run stays inside Gemini's free-tier daily quota. On Sundays it runs after

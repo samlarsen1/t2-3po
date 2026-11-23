@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.profiles import ModelProfile
 
@@ -80,8 +82,9 @@ OVERVIEW = {
 class Recorder:
     """Scripted review agents that record every agent's instructions and prompt."""
 
-    def __init__(self, overview_fails: bool = False) -> None:
+    def __init__(self, overview_fails: bool = False, unavailable: str | None = None) -> None:
         self.overview_fails = overview_fails
+        self.unavailable = unavailable
         self.instructions: dict[str, str] = {}
         self.prompts: dict[str, list[str]] = {"vehicle": [], "overview": [], "council": []}
         self.model = FunctionModel(
@@ -93,6 +96,8 @@ class Recorder:
         text = info.instructions or ""
         if "You are the Vehicle Analyst" in text:
             name, ticker = "vehicle", prompt.split('<thesis ticker="')[1].split('"')[0]
+            if ticker == self.unavailable:
+                raise ModelHTTPError(503, "gemini-3.6-flash", {"status": "UNAVAILABLE"})
             output: Any = PROFILES[ticker]
         elif "You are the Portfolio Reviewer" in text:
             name, output = "overview", ("not json" if self.overview_fails else OVERVIEW)
@@ -350,6 +355,24 @@ def test_one_failed_stock_keeps_the_others_and_is_reported(
     assert "Review failed, so this stock isn't included: RKLB." in report.read_text()
     assert '"symbol": "RKLB"' not in recorder.prompts["overview"][0]
     assert len(list((tmp_path / "proposals").iterdir())) == 2
+
+
+def test_a_stock_that_fails_on_every_fallback_model_keeps_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = Recorder(unavailable="RKLB")
+    # Every model in the list is overloaded for RKLB, so FallbackModel raises an exception group.
+    recorder.model = FallbackModel(recorder.model, recorder.model)  # type: ignore[assignment]
+
+    assert _run(tmp_path, monkeypatch, recorder) == 1
+
+    [report] = (tmp_path / "reports").iterdir()
+    assert "Review failed, so this stock isn't included: RKLB." in report.read_text()
+    assert len(list((tmp_path / "proposals").iterdir())) == 2
+    [run] = Path(os.environ["T2_RUNS_DIR"]).glob("*-review.json")
+    result = json.loads(run.read_text())["result"]
+    assert result["failed"] == ["RKLB"]
+    assert sorted(entry["symbol"] for entry in result["stocks"]) == ["HOOD", "NG."]
 
 
 def test_a_failed_overview_still_writes_the_profiles(

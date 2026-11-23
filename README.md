@@ -122,8 +122,8 @@ uv run t2-3po review --only RIO HOOD --dry-run
 # Review every stock, then write the report and a proposal per stock
 uv run t2-3po review
 
-# Review only the 5 stocks reviewed least recently (what the daily timer runs)
-uv run t2-3po review --batch 5
+# Review only the 2 stocks reviewed least recently (what the daily timer runs)
+uv run t2-3po review --batch 2
 ```
 
 `--batch N` spreads the stocks over several days, so each run stays inside Gemini's free-tier daily
@@ -329,8 +329,9 @@ bin/t2-deploy deploy t2-3po           # deploy the newest tag
 bin/t2-deploy status
 ```
 
-The units run `t2-3po review --batch 5` every day at 07:00 UK time (`t2-3po.timer`), so about 25
-stocks are each reviewed once a week, and `t2-3po advise` on Sundays at 08:00
+The units run `t2-3po review --batch 2` every day at 07:00 UK time (`t2-3po.timer`), working
+through the stocks on a rolling basis, oldest review first, so 25 stocks are each reviewed about
+every two weeks; and `t2-3po advise` on Sundays at 08:00
 (`t2-3po-advise.timer`), an hour after the review and two after T2-BB8's harvest. Read the advice in
 `$T2_APPS/t2-3po/reports/` and answer it with `t2-3po suggestions`, run from that directory. A run missed while the machine was off or asleep runs at the next start-up. It
 reads the stocks from the deployed T2-D2 (`../t2-d2/config/stocks.yaml`), so deploy that first,

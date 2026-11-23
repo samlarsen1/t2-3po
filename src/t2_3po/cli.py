@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UnexpectedModelBehavior
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    FallbackExceptionGroup,
+    ModelAPIError,
+    UnexpectedModelBehavior,
+)
 from pydantic_ai.models import Model
 
 from .advise import (
@@ -75,6 +80,8 @@ _EVALUATION_ERRORS = (
     MarketDataError,
     AgentRunError,
     ModelAPIError,
+    # Raised instead of ModelAPIError when every model in GEMINI_MODEL fails.
+    FallbackExceptionGroup,
     UnexpectedModelBehavior,
 )
 
