@@ -1,14 +1,15 @@
 # Installed by t2-hq's bin/t2-deploy, which replaces @APP_DIR@ with the deployed app directory.
 [Unit]
-Description=T2-3PO daily review of five t2-d2 stocks against the macro thesis
+Description=T2-3PO daily review of two t2-d2 stocks against the macro thesis
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=@APP_DIR@
-# Five stocks a day, least recently reviewed first: six model calls with the overview.
-ExecStart=@APP_DIR@/.venv/bin/t2-3po review --batch 5
+# Two stocks a day, least recently reviewed first, on a rolling basis: three model calls with
+# the overview, leaving room for retries and fallbacks inside the free tier's daily quota.
+ExecStart=@APP_DIR@/.venv/bin/t2-3po review --batch 2
 # Exit code 3 means skipped (a lock is held), which is not a failure.
 SuccessExitStatus=3
 # Gemini's free tier is paced and retried, so a full review can take a while.
