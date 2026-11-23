@@ -11,6 +11,7 @@ from google.genai.types import HttpRetryOptions
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import UserContent
 from pydantic_ai.models import Model
+from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.google import GoogleProvider
@@ -231,6 +232,16 @@ GEMINI_RETRY = HttpRetryOptions(
     http_status_codes=[429, 500, 502, 503, 504],
 )
 
+# A model with another after it in GEMINI_MODEL retries once, then hands over: failed attempts
+# count against the daily quota, and an overloaded or exhausted model rarely recovers in minutes.
+GEMINI_FALLBACK_RETRY = HttpRetryOptions(
+    attempts=2,
+    initial_delay=15.0,
+    max_delay=15.0,
+    exp_base=2.0,
+    http_status_codes=[429, 500, 502, 503, 504],
+)
+
 
 @dataclass(frozen=True)
 class ReviewAgents:
@@ -284,7 +295,8 @@ class Council:
 
 
 def _settings(model: Model) -> ModelSettings:
-    inner = model.wrapped if isinstance(model, PacedModel) else model
+    inner = model.models[0] if isinstance(model, FallbackModel) else model
+    inner = inner.wrapped if isinstance(inner, PacedModel) else inner
     return _GEMINI_SETTINGS if isinstance(inner, GoogleModel) else _LOCAL_SETTINGS
 
 
@@ -325,7 +337,8 @@ def build_model(settings: Settings) -> Model:
     """Create the model used by every agent: Gemini on Google's free tier, or a local model.
 
     Gemini requests are paced to stay under the free tier's per-minute limit and retried with
-    backoff when rate limited.
+    backoff when rate limited. With several models in ``GEMINI_MODEL``, a request that still fails
+    on one model is sent to the next; only the last retries with the full backoff.
 
     Raises:
         ValueError: If the provider is Google and ``GOOGLE_API_KEY`` is missing.
@@ -336,19 +349,29 @@ def build_model(settings: Settings) -> Model:
         )
     if settings.google_api_key is None:
         raise ValueError("GOOGLE_API_KEY is not set")
-    provider = GoogleProvider(
-        api_key=settings.google_api_key.get_secret_value(), retry_options=GEMINI_RETRY
-    )
-    gemini = GoogleModel(settings.gemini_model, provider=provider)
-    return PacedModel(gemini, settings.gemini_min_interval_seconds)
+    key = settings.google_api_key.get_secret_value()
+    names = settings.gemini_models
+    models: list[Model] = []
+    for index, name in enumerate(names):
+        last = index == len(names) - 1
+        retry = GEMINI_RETRY if last else GEMINI_FALLBACK_RETRY
+        provider = GoogleProvider(api_key=key, retry_options=retry)
+        # Each model has its own per-minute limit, so each gets its own pacing.
+        models.append(
+            PacedModel(GoogleModel(name, provider=provider), settings.gemini_min_interval_seconds)
+        )
+    if len(models) == 1:
+        return models[0]
+    return FallbackModel(*models)
 
 
 async def _run[T](agent: Agent[None, T], prompt: str | Sequence[UserContent]) -> T:
     result = await agent.run(prompt)
     usage = result.usage
     logger.info(
-        "agent_finished agent=%s usage_input=%s usage_output=%s",
+        "agent_finished agent=%s model=%s usage_input=%s usage_output=%s",
         agent.name,
+        result.response.model_name,
         usage.input_tokens,
         usage.output_tokens,
     )

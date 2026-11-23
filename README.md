@@ -67,21 +67,25 @@ token usage of each.
 Both options are free. `MODEL_PROVIDER` picks one.
 
 **Gemini on Google's free tier** (`MODEL_PROVIDER=google`, the default). Get a key from
-[Google AI Studio](https://aistudio.google.com/apikey) and set `GOOGLE_API_KEY`. `GEMINI_MODEL`
-defaults to `gemini-3.7-flash`. Google retires model names, and the `-latest` aliases aren't
-offered to every key, so if a run fails with a 404 for the model, list the Flash models your key
-can use and set `GEMINI_MODEL` to one of them:
+[Google AI Studio](https://aistudio.google.com/apikey) and set `GOOGLE_API_KEY`. `GEMINI_MODEL` is
+a comma-separated list of models in order of preference, by default
+`gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash`. A request that fails on one model (overloaded
+with 503s, out of quota with 429s, or timed out) is sent to the next, and each model has its own
+free-tier quota. The log line `agent_finished` names the model that answered. Google retires model
+names, and the `-latest` aliases aren't offered to every key, so list the Flash models your key can
+use (the ones in `GEMINI_MODEL` are marked with their place) and pick from them:
 
 ```bash
 uv run t2-3po models
 ```
 
-- **Rate limits.** The free tier allows only a few requests a minute and a daily quota. t2-3po starts
-  requests at least `GEMINI_MIN_INTERVAL_SECONDS` apart (7s by default, so under 10 a minute), even
-  when agents run in parallel, and retries a rate-limited or failed request up to four more times,
-  waiting 15s, then longer, up to 2 minutes. A `review` of 18 stocks takes about two and a half
-  minutes. If you still see 429 errors, raise the interval; if the daily quota runs out, the run fails
-  and can be repeated the next day. The free daily quota can be as low as 20 requests per model, and a
+- **Rate limits.** The free tier allows 5 requests a minute and a daily quota, per model. t2-3po
+  starts each model's requests at least `GEMINI_MIN_INTERVAL_SECONDS` apart (13s by default), even
+  when agents run in parallel. A model with another after it in `GEMINI_MODEL` retries a failed
+  request once after 15s, then hands it on, because failed attempts also count against the daily
+  quota. The last model retries up to four more times, waiting 15s, then longer, up to 2 minutes.
+  If you still see 429 errors, raise the interval; if every model's daily quota runs out, the run
+  fails and can be repeated the next day. Google's day resets at midnight Pacific time (08:00 UK). The free daily quota can be as low as 20 requests per model, and a
   `review` makes one per stock plus one for the overview, so use `--batch` for more than a few stocks.
 - **Privacy.** Google may use free-tier prompts and responses to improve its products. Prompts
   contain your thesis, the stocks and your portfolio weights; with a portfolio they also contain
@@ -298,8 +302,8 @@ A thesis is a markdown file with YAML front matter. See
 | `ADVISE_LOOKBACK_DAYS` | `30` | Days of run reports the advice considers |
 | `MAX_SUGGESTIONS` | `5` | Most suggestions kept per run |
 | `REJECTED_MEMORY_DAYS` | `90` | How long a rejected suggestion isn't repeated |
-| `GEMINI_MODEL` | `gemini-3.7-flash` | Gemini model for every agent, including document digests |
-| `GEMINI_MIN_INTERVAL_SECONDS` | `7` | Minimum gap between the starts of two Gemini requests |
+| `GEMINI_MODEL` | `gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash` | Gemini models for every agent, including document digests, comma-separated; each failed request moves on to the next |
+| `GEMINI_MIN_INTERVAL_SECONDS` | `13` | Minimum gap between the starts of two requests to one Gemini model |
 | `OLLAMA_MODEL` | `qwen3:4b` | Local model, with `MODEL_PROVIDER=ollama` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama server |
 | `MAX_SECTOR_WEIGHT` | `0.30` | Sector limit, as a share of total ISA value |
