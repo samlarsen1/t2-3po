@@ -246,7 +246,7 @@ t2-3po follows the T2 droid contract (t2-hq `CONTRACT.md`):
 
 - **Run report.** Every run writes a JSON report to `var/runs/<UTC timestamp>-<command>.json`
   (or `$T2_RUNS_DIR`). It records the version, command, start and end time, dry-run flag, status,
-  exit code, a one-line summary and errors. Its `result` lists each thesis or stock with its verdict and the files written. `evaluate` and `review` fail with `1` if any thesis or stock fails, or the portfolio can't be fetched; a missing key or thesis is `2`. `export` writes a report too, and `--dry-run` still writes the run report. `--report PATH` writes it somewhere else.
+  exit code, a one-line summary and errors. Its `result` lists each thesis or stock with its verdict and the files written. For `review`, each stock also has a `summary` of at most five lines (the action and target weight, pillars, strategy, why, and the main risk), which t2-hq sends to Telegram. `evaluate` and `review` fail with `1` if any thesis or stock fails, or the portfolio can't be fetched; a missing key or thesis is `2`. `export` writes a report too, and `--dry-run` still writes the run report. `--report PATH` writes it somewhere else.
 - **Exit codes:** `0` success, `1` the run failed, `2` configuration or usage error, `3` skipped
   (another evaluation or review is running, or the Trading212 lock is held).
 - **One run at a time.** A second run while one is in progress exits `3` at once.
