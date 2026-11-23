@@ -60,6 +60,7 @@ from .review import (
     gather_profiles,
     overview_or_none,
     render_review,
+    stock_summary,
     stock_thesis,
     write_review,
 )
@@ -249,8 +250,13 @@ async def _review(args: argparse.Namespace, settings: Settings, report: RunRepor
     for review in reviews:
         entry: dict[str, Any] = {
             "symbol": review.stock.symbol,
+            "name": review.stock.name,
             "status": str(review.profile.thesis_status),
             "role": str(review.profile.role),
+            "action": str(review.profile.proposed_allocation.action),
+            "target_weight": review.profile.proposed_allocation.target_weight,
+            # At most five lines, which t2-hq sends to the operator on Telegram.
+            "summary": stock_summary(review),
         }
         if not args.dry_run:
             path = write_proposal(review.proposal, settings.proposals_dir)

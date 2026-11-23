@@ -39,6 +39,45 @@ class StockReview:
     proposal: Proposal
 
 
+SUMMARY_LINE_CHARS = 200
+
+
+def _first_sentence(text: str) -> str:
+    text = " ".join(text.split())
+    end = text.find(". ")
+    return text if end == -1 else text[: end + 1]
+
+
+def _clip(line: str) -> str:
+    return line if len(line) <= SUMMARY_LINE_CHARS else line[: SUMMARY_LINE_CHARS - 1] + "…"
+
+
+def stock_summary(review: StockReview) -> str:
+    """The review's recommendation in at most five short lines, for the operator's notifications.
+
+    Built by code from the profile's fields: the verdict, pillars, strategy, the first sentence of
+    the allocation reasoning and the first key risk.
+    """
+    stock, profile = review.stock, review.profile
+    allocation = profile.proposed_allocation
+    suggested = profile.suggested_strategy
+    strategy = (
+        f"{stock.strategy} -> {suggested} suggested"
+        if suggested and suggested != stock.strategy
+        else f"{stock.strategy}, no change"
+    )
+    lines = [
+        f"{stock.symbol} {stock.name}: {allocation.action} at {allocation.target_weight:.1%} "
+        f"({profile.thesis_status}, {profile.role})",
+        f"Pillars: {', '.join(profile.thesis_pillars) or 'none'}",
+        f"Strategy: {strategy}",
+        f"Why: {_first_sentence(allocation.reasoning)}",
+    ]
+    if profile.key_risks:
+        lines.append(f"Risk: {_first_sentence(profile.key_risks[0])}")
+    return "\n".join(_clip(line) for line in lines)
+
+
 def stock_thesis(path: Path, macro_thesis: str, stock: Stock) -> Thesis:
     """Pair the macro thesis with one stock, so the normal data stage can gather its context."""
     return Thesis(

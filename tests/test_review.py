@@ -266,6 +266,35 @@ def test_a_real_run_writes_one_report_and_a_proposal_per_stock(
     assert by_ticker["NG."].thesis_file == "core.md"
 
 
+def test_the_run_report_carries_a_short_summary_of_each_recommendation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _run(tmp_path, monkeypatch, Recorder()) == 0
+
+    [run] = Path(os.environ["T2_RUNS_DIR"]).glob("*-review.json")
+    stocks = {e["symbol"]: e for e in json.loads(run.read_text())["result"]["stocks"]}
+    rklb = stocks["RKLB"]
+    assert (rklb["name"], rklb["action"], rklb["target_weight"]) == ("RocketLab", "HOLD", 0.05)
+    assert rklb["summary"].splitlines() == [
+        "RKLB RocketLab: HOLD at 5.0% (VALIDATED, GROWTH)",
+        "Pillars: Space",
+        "Strategy: moderate -> aggressive suggested",
+        "Why: Why.",
+        "Risk: RKLB risk.",
+    ]
+    assert stocks["HOOD"]["summary"].splitlines()[2] == "Strategy: mild, no change"
+    assert all(len(e["summary"].splitlines()) <= 5 for e in stocks.values())
+
+
+def test_summary_lines_are_short() -> None:
+    from t2_3po.review import SUMMARY_LINE_CHARS, _clip, _first_sentence
+
+    assert _first_sentence("One.  Two. Three") == "One."
+    assert _first_sentence("No full stop") == "No full stop"
+    clipped = _clip("x" * 500)
+    assert len(clipped) == SUMMARY_LINE_CHARS and clipped.endswith("…")
+
+
 def test_only_limits_the_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fetched: list[str] = []
 
