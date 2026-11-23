@@ -498,11 +498,13 @@ def _models(settings: Settings, report: RunReport) -> Exit:
     except Exception as exc:  # the SDK raises several unrelated error types
         print(f"Could not list models: {type(exc).__name__}", file=sys.stderr)
         return report.finish(Exit.FAILED, "could not list models", errors=[type(exc).__name__])
+    chosen = settings.gemini_models
     for name in names:
-        marker = "  (GEMINI_MODEL)" if name == settings.gemini_model else ""
+        marker = f"  (GEMINI_MODEL #{chosen.index(name) + 1})" if name in chosen else ""
         print(f"{name}{marker}")
-    if settings.gemini_model not in names:
-        print(f"GEMINI_MODEL={settings.gemini_model} is not in this list.", file=sys.stderr)
+    missing = [name for name in chosen if name not in names]
+    if missing:
+        print(f"In GEMINI_MODEL but not in this list: {', '.join(missing)}", file=sys.stderr)
     return report.finish(Exit.OK, f"{len(names)} Flash models available", {"models": names})
 
 

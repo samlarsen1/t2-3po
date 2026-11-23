@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ModelProvider = Literal["google", "ollama"]
+
+
+def _split(names: str) -> list[str]:
+    return [name.strip() for name in names.split(",") if name.strip()]
 
 
 class Settings(BaseSettings):
@@ -24,12 +28,26 @@ class Settings(BaseSettings):
     model_provider: ModelProvider = "google"
 
     google_api_key: SecretStr | None = None
-    # A Flash model on the free tier. Google retires model names, so check them with
-    # `t2-3po models` and override with GEMINI_MODEL.
-    gemini_model: str = "gemini-3.7-flash"
-    # The free tier allows only a few requests a minute, so requests are spaced at least this far
-    # apart. 7s keeps a run under 10 requests a minute.
-    gemini_min_interval_seconds: float = Field(default=7.0, ge=0)
+    # Flash models on the free tier, comma-separated, in order of preference. A request that
+    # fails on one model (overloaded, out of quota, timed out) moves on to the next. Each model
+    # has its own free-tier quota. Google retires model names, so check them with `t2-3po models`
+    # and override with GEMINI_MODEL.
+    gemini_model: str = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash"
+    # The free tier allows 5 requests a minute per model, so each model's requests are spaced at
+    # least this far apart. 13s keeps a model under 5 a minute.
+    gemini_min_interval_seconds: float = Field(default=13.0, ge=0)
+
+    @field_validator("gemini_model")
+    @classmethod
+    def _names_a_model(cls, value: str) -> str:
+        if not _split(value):
+            raise ValueError("GEMINI_MODEL must name at least one model")
+        return value
+
+    @property
+    def gemini_models(self) -> list[str]:
+        """The Gemini models to try, in order, from the comma-separated ``GEMINI_MODEL``."""
+        return _split(self.gemini_model)
 
     # A local model served by Ollama, used when MODEL_PROVIDER=ollama. Private, but much weaker.
     ollama_model: str = "qwen3:4b"
